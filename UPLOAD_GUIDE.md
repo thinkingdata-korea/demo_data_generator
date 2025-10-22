@@ -4,6 +4,31 @@ LogBus2를 사용하여 생성된 데이터를 ThinkingEngine으로 업로드하
 
 ## 사전 준비
 
+### 1. 환경 변수 설정 (권장)
+
+`.env` 파일을 생성하여 API 키와 설정을 관리합니다:
+
+```bash
+# .env 파일
+ANTHROPIC_API_KEY=your_anthropic_api_key
+OPENAI_API_KEY=your_openai_api_key
+
+TE_APP_ID=63565828675d4b9f88bbf908edf4bc1c
+TE_RECEIVER_URL=https://te-receiver-naver.thinkingdata.kr/
+
+LOGBUS_PATH=./logbus 2/logbus
+LOGBUS_CPU_LIMIT=4
+```
+
+`.env.example` 파일을 복사하여 시작할 수 있습니다:
+
+```bash
+cp .env.example .env
+# 이후 .env 파일을 편집하여 실제 값 입력
+```
+
+### 2. 필수 정보
+
 1. **LogBus2 바이너리**: `logbus 2/` 디렉터리에 있는 LogBus2 실행 파일
 2. **ThinkingEngine 정보**:
    - APP ID: ThinkingEngine 프로젝트의 APP ID
@@ -11,7 +36,16 @@ LogBus2를 사용하여 생성된 데이터를 ThinkingEngine으로 업로드하
 
 ## 사용 방법
 
-### 1. 기본 사용법
+### 1. 기본 사용법 (.env 파일 사용)
+
+`.env` 파일에 설정이 있으면 옵션 없이 간단하게 실행:
+
+```bash
+python -m data_generator.main upload \
+  --data-file ./data_generator/output/logs_20251022_155706.jsonl
+```
+
+### 2. 명령줄 옵션으로 직접 지정
 
 ```bash
 python -m data_generator.main upload \
@@ -20,14 +54,14 @@ python -m data_generator.main upload \
   --push-url https://te-receiver-naver.thinkingdata.kr/
 ```
 
-### 2. 전체 옵션
+### 3. 전체 옵션
 
 ```bash
 python -m data_generator.main upload \
   --data-file ./data_generator/output/logs_20251022_155706.jsonl \  # 업로드할 데이터 파일
   --app-id YOUR_APP_ID \                                             # ThinkingEngine APP ID
   --push-url https://te-receiver-naver.thinkingdata.kr/ \           # Receiver URL
-  --logbus-path "./logbus 2/logbus" \                               # LogBus2 바이너리 경로 (기본값)
+  --logbus-path "./logbus 2/logbus" \                               # LogBus2 바이너리 경로
   --cpu-limit 4 \                                                    # CPU 코어 수 제한
   --compress \                                                       # Gzip 압축 사용 (기본값)
   --auto-remove \                                                    # 업로드 후 파일 자동 삭제
@@ -36,54 +70,60 @@ python -m data_generator.main upload \
   --no-auto-stop                                                    # 업로드 후 LogBus 자동 중지 안 함
 ```
 
-### 3. 옵션 설명
+### 4. 옵션 설명
 
 | 옵션 | 단축 | 필수 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--data-file` | `-f` | ✅ | - | 업로드할 데이터 파일 경로 (.jsonl) |
-| `--app-id` | `-a` | ✅ | - | ThinkingEngine APP ID |
-| `--push-url` | `-u` | ✅ | - | ThinkingEngine Receiver URL |
-| `--logbus-path` | `-l` | ❌ | `./logbus 2/logbus` | LogBus2 바이너리 경로 |
-| `--cpu-limit` | - | ❌ | `4` | CPU 코어 수 제한 |
+| `--app-id` | `-a` | ❌ | `.env`의 `TE_APP_ID` | ThinkingEngine APP ID |
+| `--push-url` | `-u` | ❌ | `.env`의 `TE_RECEIVER_URL` | ThinkingEngine Receiver URL |
+| `--logbus-path` | `-l` | ❌ | `.env`의 `LOGBUS_PATH` | LogBus2 바이너리 경로 |
+| `--cpu-limit` | - | ❌ | `.env`의 `LOGBUS_CPU_LIMIT` | CPU 코어 수 제한 |
 | `--compress` | - | ❌ | `True` | Gzip 압축 사용 |
 | `--auto-remove` | - | ❌ | `False` | 업로드 후 파일 자동 삭제 |
 | `--remove-after-days` | - | ❌ | `7` | 파일 삭제 기간 (일) |
 | `--monitor-interval` | - | ❌ | `5` | 모니터링 간격 (초) |
 | `--no-auto-stop` | - | ❌ | `False` | 업로드 후 LogBus 자동 중지 안 함 |
 
+**참고:** `--app-id`와 `--push-url`은 `.env` 파일에 설정하면 필수가 아닙니다.
+
 ## 사용 예시
 
-### 예시 1: 기본 업로드
+### 예시 1: .env 파일 사용 (가장 간단)
+
+```bash
+# .env 파일에 설정이 있는 경우
+python -m data_generator.main upload \
+  -f ./data_generator/output/logs_20251022_155706.jsonl
+```
+
+### 예시 2: 명령줄 옵션 사용
 
 ```bash
 python -m data_generator.main upload \
   -f ./data_generator/output/logs_20251022_155706.jsonl \
-  -a "your_app_id_here" \
+  -a "63565828675d4b9f88bbf908edf4bc1c" \
   -u "https://te-receiver-naver.thinkingdata.kr/"
 ```
 
-### 예시 2: 자동 파일 삭제 활성화
+### 예시 3: 자동 파일 삭제 활성화
 
 업로드 후 7일이 지나면 파일을 자동으로 삭제합니다.
 
 ```bash
 python -m data_generator.main upload \
   -f ./data_generator/output/logs_20251022_155706.jsonl \
-  -a "your_app_id_here" \
-  -u "https://te-receiver-naver.thinkingdata.kr/" \
   --auto-remove \
   --remove-after-days 7
 ```
 
-### 예시 3: LogBus를 계속 실행 상태로 유지
+### 예시 4: LogBus를 계속 실행 상태로 유지
 
 업로드 후에도 LogBus를 중지하지 않습니다 (추가 파일 업로드를 위해).
 
 ```bash
 python -m data_generator.main upload \
   -f ./data_generator/output/logs_20251022_155706.jsonl \
-  -a "your_app_id_here" \
-  -u "https://te-receiver-naver.thinkingdata.kr/" \
   --no-auto-stop
 ```
 

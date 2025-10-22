@@ -201,10 +201,10 @@ def inspect(taxonomy_file: str):
 
 @cli.command()
 @click.option('--data-file', '-f', required=True, type=click.Path(exists=True), help='업로드할 데이터 파일 경로 (.jsonl)')
-@click.option('--app-id', '-a', required=True, help='ThinkingEngine APP ID')
-@click.option('--push-url', '-u', required=True, help='ThinkingEngine Receiver URL')
-@click.option('--logbus-path', '-l', default='./logbus 2/logbus', type=click.Path(exists=True), help='LogBus2 바이너리 경로')
-@click.option('--cpu-limit', type=int, default=4, help='CPU 코어 수 제한')
+@click.option('--app-id', '-a', type=str, default=None, help='ThinkingEngine APP ID (기본값: .env의 TE_APP_ID)')
+@click.option('--push-url', '-u', type=str, default=None, help='ThinkingEngine Receiver URL (기본값: .env의 TE_RECEIVER_URL)')
+@click.option('--logbus-path', '-l', type=str, default=None, help='LogBus2 바이너리 경로 (기본값: .env의 LOGBUS_PATH)')
+@click.option('--cpu-limit', type=int, default=None, help='CPU 코어 수 제한 (기본값: .env의 LOGBUS_CPU_LIMIT)')
 @click.option('--compress', is_flag=True, default=True, help='Gzip 압축 사용')
 @click.option('--auto-remove', is_flag=True, default=False, help='업로드 후 파일 자동 삭제')
 @click.option('--remove-after-days', type=int, default=7, help='파일 삭제 기간 (일)')
@@ -212,10 +212,10 @@ def inspect(taxonomy_file: str):
 @click.option('--no-auto-stop', is_flag=True, default=False, help='업로드 후 LogBus 자동 중지 안 함')
 def upload(
     data_file: str,
-    app_id: str,
-    push_url: str,
-    logbus_path: str,
-    cpu_limit: int,
+    app_id: Optional[str],
+    push_url: Optional[str],
+    logbus_path: Optional[str],
+    cpu_limit: Optional[int],
     compress: bool,
     auto_remove: bool,
     remove_after_days: int,
@@ -225,6 +225,20 @@ def upload(
     """생성된 데이터를 ThinkingEngine으로 업로드"""
     console.print("\n[bold cyan]📤 LogBus2 데이터 업로드[/bold cyan]")
     console.print("=" * 60)
+
+    # Load from environment variables if not provided
+    app_id = app_id or os.getenv("TE_APP_ID")
+    push_url = push_url or os.getenv("TE_RECEIVER_URL")
+    logbus_path = logbus_path or os.getenv("LOGBUS_PATH", "./logbus 2/logbus")
+    cpu_limit = cpu_limit or int(os.getenv("LOGBUS_CPU_LIMIT", "4"))
+
+    # Validate required fields
+    if not app_id:
+        console.print("[red]✗ APP ID가 필요합니다. --app-id 옵션을 사용하거나 .env 파일에 TE_APP_ID를 설정하세요.[/red]")
+        return
+    if not push_url:
+        console.print("[red]✗ Receiver URL이 필요합니다. --push-url 옵션을 사용하거나 .env 파일에 TE_RECEIVER_URL을 설정하세요.[/red]")
+        return
 
     console.print(f"\n[green]설정:[/green]")
     console.print(f"  데이터 파일: {data_file}")

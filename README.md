@@ -39,19 +39,39 @@ pip install -r requirements.txt
 
 ### 4. 환경 변수 설정
 
-`.env` 파일을 생성하고 API 키를 설정합니다:
+`.env` 파일을 생성하고 API 키와 설정을 입력합니다:
 
 ```bash
-# OpenAI를 사용하는 경우
-OPENAI_API_KEY=your_openai_api_key
+cp .env.example .env
+# .env 파일을 편집하여 실제 값 입력
+```
 
-# Claude를 사용하는 경우
+필수 설정:
+```bash
+# AI API 키 (필수)
+OPENAI_API_KEY=your_openai_api_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# ThinkingEngine 설정 (업로드 기능 사용 시 필수)
+TE_APP_ID=63565828675d4b9f88bbf908edf4bc1c
+TE_RECEIVER_URL=https://te-receiver-naver.thinkingdata.kr/
+
+# LogBus2 설정 (선택사항)
+LOGBUS_PATH=./logbus 2/logbus
+LOGBUS_CPU_LIMIT=4
 ```
 
 ## 사용법
 
-### 기본 사용
+### 1. 대화형 모드 (권장)
+
+```bash
+python -m data_generator.main interactive
+```
+
+단계별 안내를 따라 쉽게 데이터를 생성할 수 있습니다.
+
+### 2. CLI 명령 모드
 
 ```bash
 python -m data_generator.main generate \
@@ -61,32 +81,40 @@ python -m data_generator.main generate \
   --platform mobile_app \
   --start-date 2024-01-01 \
   --end-date 2024-01-07 \
-  --dau 10000
+  --dau 100 \
+  --ai-provider anthropic
 ```
 
-### 전체 옵션
+### 3. 데이터 업로드
+
+생성된 데이터를 ThinkingEngine으로 업로드:
 
 ```bash
-python -m data_generator.main generate \
-  --taxonomy <path-to-taxonomy-file> \
-  --product-name "Product Name" \
-  --industry <industry-type> \
-  --platform <platform-type> \
-  --start-date YYYY-MM-DD \
-  --end-date YYYY-MM-DD \
-  --dau <daily-active-users> \
-  --total-users <total-users> \
-  --ai-provider <openai|anthropic> \
-  --ai-model <model-name> \
-  --description "Product description" \
-  --output-dir ./output \
-  --seed 42
+# .env에 설정이 있는 경우
+python -m data_generator.main upload \
+  -f ./data_generator/output/logs_YYYYMMDD_HHMMSS.jsonl
+
+# 또는 직접 지정
+python -m data_generator.main upload \
+  -f ./data_generator/output/logs_YYYYMMDD_HHMMSS.jsonl \
+  -a YOUR_APP_ID \
+  -u https://te-receiver-naver.thinkingdata.kr/
 ```
 
-### 택소노미 파일 검사
+자세한 업로드 가이드: [UPLOAD_GUIDE.md](UPLOAD_GUIDE.md)
+
+### 4. 택소노미 파일 검사
 
 ```bash
 python -m data_generator.main inspect event_tracking/data/예시\ -\ 방치형\ 게임.xlsx
+```
+
+### 명령어 도움말
+
+```bash
+python -m data_generator.main --help
+python -m data_generator.main generate --help
+python -m data_generator.main upload --help
 ```
 
 ## 산업 유형

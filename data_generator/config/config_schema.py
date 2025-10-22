@@ -47,6 +47,7 @@ class ScenarioConfig(BaseModel):
     scenario_type: ScenarioType = Field(..., description="시나리오 유형")
     percentage: float = Field(..., ge=0, le=100, description="전체 유저 중 비율 (%)")
     description: Optional[str] = Field(None, description="시나리오 설명")
+    custom_behavior: Optional[str] = Field(None, description="커스텀 행동 시나리오 (자유 텍스트, AI가 해석)")
 
 
 class DataGeneratorConfig(BaseModel):
@@ -84,7 +85,16 @@ class DataGeneratorConfig(BaseModel):
     ai_api_key: Optional[str] = Field(None, description="AI API key (if None, read from env)")
 
     # Additional context for AI
-    product_description: Optional[str] = Field(None, description="Additional product description for AI context")
+    product_description: Optional[str] = Field(None, description="앱/제품의 특성 및 비고 (AI 컨텍스트)")
+
+    # Custom scenario description
+    custom_scenario: Optional[str] = Field(None, description="커스텀 시나리오 자유 텍스트 (예: 'D1 유저들이 튜토리얼에서 많이 이탈')")
+
+    # Data generation volume
+    avg_events_per_user_per_day: Optional[tuple] = Field(
+        default=(5, 30),
+        description="1인당 하루 평균 이벤트 발생량 범위 (min, max)"
+    )
 
     # Output configuration
     output_dir: str = Field(default="./data_generator/output", description="Output directory")

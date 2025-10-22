@@ -17,6 +17,7 @@ from .generators.behavior_engine import BehaviorEngine
 from .generators.log_generator import LogGenerator
 from .ai.openai_client import OpenAIClient
 from .ai.claude_client import ClaudeClient
+from .interactive import interactive_mode
 
 # Load environment variables
 load_dotenv()
@@ -26,24 +27,33 @@ console = Console()
 
 @click.group()
 def cli():
-    """Demo Data Generator - Generate realistic log data for analytics"""
+    """Demo Data Generator - 현실적인 로그 데이터 생성기"""
     pass
 
 
 @cli.command()
-@click.option('--taxonomy', '-t', required=True, type=click.Path(exists=True), help='Path to taxonomy Excel/CSV file')
-@click.option('--product-name', '-p', required=True, help='Product/App name')
-@click.option('--industry', '-i', required=True, type=click.Choice([e.value for e in IndustryType]), help='Industry type')
-@click.option('--platform', required=True, type=click.Choice([e.value for e in PlatformType]), help='Platform type')
-@click.option('--start-date', required=True, type=click.DateTime(formats=['%Y-%m-%d']), help='Start date (YYYY-MM-DD)')
-@click.option('--end-date', required=True, type=click.DateTime(formats=['%Y-%m-%d']), help='End date (YYYY-MM-DD)')
-@click.option('--dau', required=True, type=int, help='Daily Active Users')
-@click.option('--total-users', type=int, default=None, help='Total registered users (default: DAU * 3.5)')
-@click.option('--ai-provider', type=click.Choice(['openai', 'anthropic']), default='openai', help='AI provider')
-@click.option('--ai-model', type=str, default=None, help='AI model name (optional)')
-@click.option('--description', type=str, default=None, help='Product description for AI context')
-@click.option('--output-dir', '-o', type=click.Path(), default='./data_generator/output', help='Output directory')
-@click.option('--seed', type=int, default=None, help='Random seed for reproducibility')
+def interactive():
+    """대화형 모드로 데이터 생성 (추천)"""
+    interactive_mode()
+
+
+@cli.command()
+@click.option('--taxonomy', '-t', required=True, type=click.Path(exists=True), help='택소노미 Excel/CSV 파일 경로')
+@click.option('--product-name', '-p', required=True, help='제품/앱 이름')
+@click.option('--industry', '-i', required=True, type=click.Choice([e.value for e in IndustryType]), help='산업 유형')
+@click.option('--platform', required=True, type=click.Choice([e.value for e in PlatformType]), help='플랫폼 유형')
+@click.option('--start-date', required=True, type=click.DateTime(formats=['%Y-%m-%d']), help='시작 날짜 (YYYY-MM-DD)')
+@click.option('--end-date', required=True, type=click.DateTime(formats=['%Y-%m-%d']), help='종료 날짜 (YYYY-MM-DD)')
+@click.option('--dau', required=True, type=int, help='일일 활성 사용자 수 (DAU)')
+@click.option('--total-users', type=int, default=None, help='전체 등록 유저 수 (기본값: DAU * 3.5)')
+@click.option('--ai-provider', type=click.Choice(['openai', 'anthropic']), default='openai', help='AI 제공자')
+@click.option('--ai-model', type=str, default=None, help='AI 모델 이름 (선택)')
+@click.option('--description', type=str, default=None, help='앱/제품 특성 및 비고 (AI 컨텍스트)')
+@click.option('--custom-scenario', type=str, default=None, help='커스텀 시나리오 (예: "D1 유저가 튜토리얼에서 많이 이탈")')
+@click.option('--avg-events-min', type=int, default=5, help='1인당 하루 평균 최소 이벤트 수')
+@click.option('--avg-events-max', type=int, default=30, help='1인당 하루 평균 최대 이벤트 수')
+@click.option('--output-dir', '-o', type=click.Path(), default='./data_generator/output', help='출력 디렉토리')
+@click.option('--seed', type=int, default=None, help='재현성을 위한 랜덤 시드')
 def generate(
     taxonomy: str,
     product_name: str,
@@ -56,6 +66,9 @@ def generate(
     ai_provider: str,
     ai_model: Optional[str],
     description: Optional[str],
+    custom_scenario: Optional[str],
+    avg_events_min: int,
+    avg_events_max: int,
     output_dir: str,
     seed: Optional[int],
 ):
@@ -77,6 +90,8 @@ def generate(
         ai_provider=ai_provider,
         ai_model=ai_model,
         product_description=description,
+        custom_scenario=custom_scenario,
+        avg_events_per_user_per_day=(avg_events_min, avg_events_max),
         output_dir=output_dir,
         seed=seed,
     )

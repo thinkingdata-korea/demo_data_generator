@@ -4,7 +4,7 @@ User generator for creating virtual users.
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from faker import Faker
 
 from ..models.user import User, UserSegment
@@ -116,73 +116,129 @@ class UserGenerator:
         return user
 
     def _generate_initial_state(self, segment: UserSegment, days_before_start: int) -> Dict[str, Any]:
-        """Generate initial user state with realistic values"""
-        # Channel distribution
-        channels = ["organic", "facebook_ads", "google_ads", "apple_search_ads", "tiktok_ads", "youtube"]
-        weights = [0.4, 0.2, 0.15, 0.1, 0.1, 0.05]
-        channel = random.choices(channels, weights=weights)[0]
+        """Generate initial user state with realistic values based on taxonomy"""
+        state = {}
 
-        # Server ID (simulate multiple game servers)
-        server_id = f"server_{random.randint(1, 10):02d}"
-
-        # Level based on how long user has been around
+        # Generate progression level (used for calculating other values)
         if segment == UserSegment.NEW_USER:
-            level = random.randint(1, 5)
+            progression_level = random.randint(1, 5)
         elif segment == UserSegment.POWER_USER:
-            level = random.randint(50, 150)
+            progression_level = random.randint(50, 150)
         elif segment == UserSegment.CHURNED_USER:
-            level = random.randint(10, 40)
+            progression_level = random.randint(10, 40)
         else:
-            level = random.randint(10, 60)
+            progression_level = random.randint(10, 60)
 
-        # Generate name
-        tmp_name = self.faker.name()
+        # Iterate through common properties from taxonomy
+        for prop in self.taxonomy.common_properties:
+            prop_name = prop.name
+            prop_type = prop.property_type.value
 
-        # Calculate resources based on level
-        xp = level * random.randint(800, 1200)
-        combat_power = level * random.randint(100, 200)
-        gold = level * random.randint(500, 2000)
-        gem = level * random.randint(10, 50)
-        crystal = level * random.randint(5, 30)
-        stamina = random.randint(50, 100)
+            # Generate value based on property name and type
+            value = self._generate_property_value_by_name(
+                prop_name,
+                prop_type,
+                progression_level,
+                days_before_start
+            )
 
-        # Stage progression
-        main_stage_id = f"stage_{(level // 5) + 1}_{random.randint(1, 10)}"
+            state[prop_name] = value
 
-        # Stats
-        base_stat = level * 10
-        tmp_stat_attack = int(base_stat * random.uniform(0.8, 1.2))
-        tmp_stat_defense = int(base_stat * random.uniform(0.7, 1.1))
-        tmp_stat_hp_max = int(base_stat * random.uniform(5, 8))
-        tmp_stat_hp_current = tmp_stat_hp_max
+        return state
 
-        return {
-            "channel": channel,
-            "server_id": server_id,
-            "tmp_name": tmp_name,
-            "tmp_level": level,
-            "tmp_xp": xp,
-            "tmp_combat_power": combat_power,
-            "tmp_main_stage_id": main_stage_id,
-            "tmp_gold": gold,
-            "tmp_gem": gem,
-            "tmp_crystal": crystal,
-            "tmp_stamina": stamina,
-            "tmp_pvp_point": random.randint(0, level * 10),
-            "tmp_guild_id": f"guild_{random.randint(1, 100):03d}" if random.random() > 0.3 else None,
-            "tmp_stat_attack": tmp_stat_attack,
-            "tmp_stat_defense": tmp_stat_defense,
-            "tmp_stat_hp_current": tmp_stat_hp_current,
-            "tmp_stat_hp_max": tmp_stat_hp_max,
-            "tmp_stat_attack_speed": round(random.uniform(1.0, 2.5), 2),
-            "tmp_stat_movement_speed": round(random.uniform(1.0, 2.0), 2),
-            "tmp_stat_critical_rate": round(random.uniform(0.05, 0.30), 2),
-            "tmp_stat_critical_damage": round(random.uniform(1.5, 3.0), 2),
-            "tmp_active_buff_list": [],
-            "tmp_days_since_install": days_before_start,
-            "tmp_session_count": random.randint(days_before_start, days_before_start * 3),
-            "tmp_total_playtime_minutes": random.randint(days_before_start * 10, days_before_start * 60),
-        }
+    def _generate_property_value_by_name(
+        self,
+        prop_name: str,
+        prop_type: str,
+        progression_level: int,
+        days_before_start: int
+    ) -> Any:
+        """Generate realistic value based on property name patterns"""
+        prop_lower = prop_name.lower()
+
+        # String type properties
+        if prop_type == "string":
+            if "channel" in prop_lower:
+                channels = ["organic", "facebook_ads", "google_ads", "apple_search_ads", "tiktok_ads", "youtube"]
+                weights = [0.4, 0.2, 0.15, 0.1, 0.1, 0.05]
+                return random.choices(channels, weights=weights)[0]
+            elif "server" in prop_lower:
+                return f"server_{random.randint(1, 10):02d}"
+            elif "name" in prop_lower or "nick" in prop_lower:
+                return self.faker.name()
+            elif "stage" in prop_lower or "level_id" in prop_lower:
+                return f"stage_{(progression_level // 5) + 1}_{random.randint(1, 10)}"
+            elif "guild" in prop_lower and random.random() > 0.3:
+                return f"guild_{random.randint(1, 100):03d}"
+            else:
+                return f"value_{random.randint(1, 100)}"
+
+        # Number type properties
+        elif prop_type == "number":
+            if "level" in prop_lower:
+                return progression_level
+            elif "xp" in prop_lower or "exp" in prop_lower:
+                return progression_level * random.randint(800, 1200)
+            elif "power" in prop_lower or "combat" in prop_lower:
+                return progression_level * random.randint(100, 200)
+            elif "gold" in prop_lower or "coin" in prop_lower:
+                return progression_level * random.randint(500, 2000)
+            elif "gem" in prop_lower or "diamond" in prop_lower or "crystal" in prop_lower:
+                return progression_level * random.randint(10, 50)
+            elif "stamina" in prop_lower or "energy" in prop_lower:
+                return random.randint(50, 100)
+            elif "pvp" in prop_lower or "rank" in prop_lower or "point" in prop_lower:
+                return random.randint(0, progression_level * 10)
+            elif "attack" in prop_lower:
+                base = progression_level * 10
+                return int(base * random.uniform(0.8, 1.2))
+            elif "defense" in prop_lower or "defence" in prop_lower:
+                base = progression_level * 10
+                return int(base * random.uniform(0.7, 1.1))
+            elif "hp" in prop_lower:
+                if "max" in prop_lower:
+                    base = progression_level * 10
+                    return int(base * random.uniform(5, 8))
+                elif "current" in prop_lower:
+                    # Return same as max HP initially
+                    base = progression_level * 10
+                    return int(base * random.uniform(5, 8))
+                else:
+                    return progression_level * random.randint(50, 100)
+            elif "speed" in prop_lower:
+                return round(random.uniform(1.0, 2.5), 2)
+            elif "rate" in prop_lower:
+                return round(random.uniform(0.05, 0.30), 2)
+            elif "damage" in prop_lower and "critical" in prop_lower:
+                return round(random.uniform(1.5, 3.0), 2)
+            elif "days" in prop_lower and "install" in prop_lower:
+                return days_before_start
+            elif "session" in prop_lower and "count" in prop_lower:
+                return random.randint(days_before_start, days_before_start * 3)
+            elif "playtime" in prop_lower or "play_time" in prop_lower:
+                return random.randint(days_before_start * 10, days_before_start * 60)
+            else:
+                return random.randint(0, progression_level * 100)
+
+        # Boolean type
+        elif prop_type == "boolean":
+            return random.choice([True, False])
+
+        # List type
+        elif prop_type == "list":
+            return []
+
+        # Time type
+        elif prop_type == "time":
+            return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Object type
+        elif prop_type == "object":
+            return {}
+
+        # Default
+        else:
+            return None
 
     def _generate_distinct_id(self) -> str:
         """Generate a distinct ID (device ID)"""

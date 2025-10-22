@@ -18,7 +18,7 @@ class ClaudeClient(BaseAIClient):
             raise ValueError("Anthropic API key not provided and ANTHROPIC_API_KEY env var not set")
 
         self.client = Anthropic(api_key=self.api_key)
-        self.model = model or "claude-3-5-sonnet-20241022"
+        self.model = model or "claude-sonnet-4-20250514"
 
     def _call_api(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """Call Claude API and parse JSON response"""

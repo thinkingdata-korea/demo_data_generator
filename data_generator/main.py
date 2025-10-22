@@ -18,6 +18,8 @@ from .generators.log_generator import LogGenerator
 from .ai.openai_client import OpenAIClient
 from .ai.claude_client import ClaudeClient
 from .interactive import interactive_mode
+from .uploader.logbus_config import LogBusConfigGenerator
+from .uploader.logbus_runner import LogBusRunner
 
 # Load environment variables
 load_dotenv()
@@ -194,6 +196,76 @@ def inspect(taxonomy_file: str):
 
     except Exception as e:
         console.print(f"\n[bold red]✗ Error: {str(e)}[/bold red]")
+        raise
+
+
+@cli.command()
+@click.option('--data-file', '-f', required=True, type=click.Path(exists=True), help='업로드할 데이터 파일 경로 (.jsonl)')
+@click.option('--app-id', '-a', required=True, help='ThinkingEngine APP ID')
+@click.option('--push-url', '-u', required=True, help='ThinkingEngine Receiver URL')
+@click.option('--logbus-path', '-l', default='./logbus 2/logbus', type=click.Path(exists=True), help='LogBus2 바이너리 경로')
+@click.option('--cpu-limit', type=int, default=4, help='CPU 코어 수 제한')
+@click.option('--compress', is_flag=True, default=True, help='Gzip 압축 사용')
+@click.option('--auto-remove', is_flag=True, default=False, help='업로드 후 파일 자동 삭제')
+@click.option('--remove-after-days', type=int, default=7, help='파일 삭제 기간 (일)')
+@click.option('--monitor-interval', type=int, default=5, help='모니터링 간격 (초)')
+@click.option('--no-auto-stop', is_flag=True, default=False, help='업로드 후 LogBus 자동 중지 안 함')
+def upload(
+    data_file: str,
+    app_id: str,
+    push_url: str,
+    logbus_path: str,
+    cpu_limit: int,
+    compress: bool,
+    auto_remove: bool,
+    remove_after_days: int,
+    monitor_interval: int,
+    no_auto_stop: bool,
+):
+    """생성된 데이터를 ThinkingEngine으로 업로드"""
+    console.print("\n[bold cyan]📤 LogBus2 데이터 업로드[/bold cyan]")
+    console.print("=" * 60)
+
+    console.print(f"\n[green]설정:[/green]")
+    console.print(f"  데이터 파일: {data_file}")
+    console.print(f"  APP ID: {app_id}")
+    console.print(f"  Receiver URL: {push_url}")
+    console.print(f"  LogBus2 경로: {logbus_path}")
+    console.print(f"  압축: {'사용' if compress else '미사용'}")
+    console.print(f"  자동 삭제: {'사용' if auto_remove else '미사용'}")
+    if auto_remove:
+        console.print(f"  삭제 기간: {remove_after_days}일")
+    console.print()
+
+    try:
+        # 1. LogBus2 설정 생성
+        config = LogBusConfigGenerator.create_config(
+            data_file_path=data_file,
+            app_id=app_id,
+            push_url=push_url,
+            cpu_limit=cpu_limit,
+            http_compress="gzip" if compress else "none",
+            auto_remove=auto_remove,
+            remove_after_days=remove_after_days
+        )
+
+        # 2. LogBus2 실행
+        runner = LogBusRunner(logbus_path)
+
+        # 3. 업로드 및 모니터링
+        success = runner.upload_and_monitor(
+            config=config,
+            monitor_interval=monitor_interval,
+            auto_stop=not no_auto_stop
+        )
+
+        if success:
+            console.print("\n[bold green]✓ 업로드 완료![/bold green]")
+        else:
+            console.print("\n[bold red]✗ 업로드 실패[/bold red]")
+
+    except Exception as e:
+        console.print(f"\n[bold red]✗ 오류: {str(e)}[/bold red]")
         raise
 
 

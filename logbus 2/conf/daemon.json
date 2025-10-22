@@ -1,0 +1,12 @@
+{
+  "datasource": [
+    {
+      "file_patterns": [
+        "/data/log1/*.txt",
+        "/data/log2/*.log"
+      ],
+      "app_id": "app_id"
+    }
+  ],
+  "push_url": "http://RECEIVER_URL"
+}

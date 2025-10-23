@@ -12,7 +12,9 @@ from ..models.event import TrackEvent, UserSetEvent, UserSetOnceEvent, UserAddEv
 from ..models.taxonomy import EventTaxonomy, UpdateMethod
 from ..config.config_schema import DataGeneratorConfig
 from ..generators.behavior_engine import BehaviorEngine
+from ..generators.preset_properties import PresetPropertiesGenerator
 from ..ai.base_client import BaseAIClient
+from ..utils.property_validator import PropertyNameValidator
 
 
 class LogGenerator:
@@ -31,18 +33,58 @@ class LogGenerator:
         self.users = users
         self.logs: List[str] = []
 
+        # 프리셋 속성 생성기 초기화
+        self.preset_generator = PresetPropertiesGenerator(
+            platform=config.platform,
+            product_name=config.product_name
+        )
+
+        # 각 유저별 프리셋 속성 캐싱 (디바이스 ID 등은 유저별로 일관되어야 함)
+        self.user_preset_cache: Dict[str, Dict[str, Any]] = {}
+
+        # 생성된 파일 경로 리스트
+        self.generated_files: List[Path] = []
+
     def generate(self) -> List[str]:
-        """Generate all logs for the configured period"""
-        print(f"Generating logs for {len(self.users)} users from {self.config.start_date} to {self.config.end_date}")
+        """
+        Generate all logs for the configured period (daily file split mode)
+        각 날짜별로 파일을 생성하고 바로 저장
+        """
+        total_days = (self.config.end_date - self.config.start_date).days + 1
+        print(f"Generating logs for {len(self.users)} users from {self.config.start_date} to {self.config.end_date} ({total_days} days)")
+
+        # 출력 디렉토리 생성
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         current_date = self.config.start_date
+        day_count = 0
 
         while current_date <= self.config.end_date:
-            print(f"Generating logs for {current_date}...")
+            day_count += 1
+            print(f"\n[{day_count}/{total_days}] Generating logs for {current_date}...")
+
+            # 해당 날짜의 로그 생성
+            self.logs = []  # 메모리 초기화
             self._generate_day_logs(current_date)
+
+            # 즉시 파일로 저장
+            if self.logs:
+                daily_file = self._save_daily_logs(current_date)
+                self.generated_files.append(daily_file)
+                print(f"  ✓ Saved {len(self.logs):,} logs to {daily_file.name}")
+            else:
+                print(f"  ⚠ No logs generated for {current_date}")
+
             current_date += timedelta(days=1)
 
-        print(f"Generated {len(self.logs)} log entries")
+        total_logs = sum(self._count_lines_in_file(f) for f in self.generated_files)
+        print(f"\n✓ Generation complete!")
+        print(f"  Total days: {len(self.generated_files)}")
+        print(f"  Total logs: {total_logs:,}")
+        print(f"  Files: {output_dir}")
+
+        # 마지막 날짜의 로그를 반환 (하위 호환성)
         return self.logs
 
     def _generate_day_logs(self, date: datetime):
@@ -56,8 +98,9 @@ class LogGenerator:
 
     def _generate_user_day_logs(self, user: User, date: datetime):
         """Generate logs for a single user for a single day"""
-        # Get behavior pattern for user's segment
-        behavior_pattern = self.behavior_engine.get_behavior_pattern(user.segment.value)
+        # Get behavior pattern - use scenario_key if available, otherwise use segment
+        scenario_key = user.metadata.get("scenario_key", user.segment.value)
+        behavior_pattern = self.behavior_engine.get_behavior_pattern(scenario_key)
 
         # Generate session times
         sessions = self.behavior_engine.generate_daily_sessions(
@@ -131,13 +174,20 @@ class LogGenerator:
         # Build properties
         properties = {}
 
-        # Add common properties (snapshot of user state at event time)
+        # 1. Add preset properties (플랫폼별 필수 프리셋 속성)
+        preset_props = self._get_user_preset_properties(user)
+        properties.update(preset_props)
+
+        # 2. Add common properties (snapshot of user state at event time)
         properties.update(self._get_common_properties(user, event_time))
 
-        # Add event-specific properties
+        # 3. Add event-specific properties
         if event.properties:
             event_props = self._generate_event_properties(user, event)
             properties.update(event_props)
+
+        # Validate and sanitize property names
+        properties = PropertyNameValidator.sanitize_properties(properties)
 
         # Create track event
         track_event = TrackEvent(
@@ -155,6 +205,24 @@ class LogGenerator:
 
         # Generate corresponding user updates if needed
         self._generate_user_updates(user, event_name, event_time, properties)
+
+    def _get_user_preset_properties(self, user: User) -> Dict[str, Any]:
+        """
+        유저별 프리셋 속성 반환 (캐싱 사용)
+        디바이스 ID, OS 등은 유저별로 일관되어야 하므로 캐싱
+        """
+        user_key = user.account_id or user.distinct_id
+
+        if user_key not in self.user_preset_cache:
+            # 처음 생성 - 유저의 가입일을 install_date로 사용
+            install_date = user.metadata.get("created_at")
+            preset_props = self.preset_generator.generate(
+                user_id=user_key,
+                install_date=install_date
+            )
+            self.user_preset_cache[user_key] = preset_props
+
+        return self.user_preset_cache[user_key].copy()
 
     def _get_common_properties(self, user: User, event_time: datetime) -> Dict[str, Any]:
         """Get common event properties (user state snapshot)"""
@@ -272,6 +340,9 @@ class LogGenerator:
                 updates["total_purchase_amount"] = user.get_state("total_purchase_amount", 0) + amount
 
             if updates:
+                # Validate and sanitize property names
+                updates = PropertyNameValidator.sanitize_properties(updates)
+
                 user_set = UserSetEvent(
                     **{
                         "#type": "user_set",
@@ -290,18 +361,59 @@ class LogGenerator:
         """Format datetime to ThinkingEngine format"""
         return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # yyyy-MM-dd HH:mm:ss.SSS
 
-    def save_to_file(self, output_path: Optional[str] = None):
-        """Save logs to JSONL file"""
-        if output_path is None:
-            output_dir = Path(self.config.output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
+    def _save_daily_logs(self, date: datetime) -> Path:
+        """
+        일일 로그를 파일로 저장
 
-            filename = self.config.output_filename or f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-            output_path = output_dir / filename
+        Args:
+            date: 날짜
+
+        Returns:
+            저장된 파일 경로
+        """
+        output_dir = Path(self.config.output_dir)
+        filename = f"logs_{date.strftime('%Y%m%d')}.jsonl"
+        output_path = output_dir / filename
 
         with open(output_path, 'w', encoding='utf-8') as f:
             for log in self.logs:
                 f.write(log + '\n')
 
-        print(f"Logs saved to: {output_path}")
         return output_path
+
+    def _count_lines_in_file(self, file_path: Path) -> int:
+        """파일의 라인 수 카운트"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return sum(1 for _ in f)
+        except:
+            return 0
+
+    def save_to_file(self, output_path: Optional[str] = None) -> Path:
+        """
+        Save logs to JSONL file (legacy method for backward compatibility)
+
+        Note: In daily split mode, this returns the path to the output directory
+        """
+        if self.generated_files:
+            # 일일 분할 모드: 출력 디렉토리 반환
+            return Path(self.config.output_dir)
+        else:
+            # 단일 파일 모드 (하위 호환성)
+            if output_path is None:
+                output_dir = Path(self.config.output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+                filename = self.config.output_filename or f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+                output_path = output_dir / filename
+
+            with open(output_path, 'w', encoding='utf-8') as f:
+                for log in self.logs:
+                    f.write(log + '\n')
+
+            print(f"Logs saved to: {output_path}")
+            return Path(output_path)
+
+    def get_generated_files(self) -> List[Path]:
+        """생성된 파일 목록 반환"""
+        return self.generated_files.copy()

@@ -37,10 +37,10 @@ class LogBusRunner:
 
     def _run_command(self, command: str, check: bool = True) -> subprocess.CompletedProcess:
         """LogBus2 명령 실행"""
-        full_command = f"{self.logbus_bin} {command}"
+        # Use list format to properly handle paths with spaces
+        cmd_list = [str(self.logbus_bin), command]
         return subprocess.run(
-            full_command,
-            shell=True,
+            cmd_list,
             cwd=str(self.working_dir),
             capture_output=True,
             text=True,

@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .config.config_schema import DataGeneratorConfig, IndustryType, PlatformType
+from .config.settings_manager import SettingsManager
 from .readers.taxonomy_reader import TaxonomyReader
 from .core.orchestrator import DataGenerationOrchestrator
 
@@ -32,6 +33,9 @@ def interactive_mode():
     console.print("\n[bold cyan]🎮 Demo Data Generator - 대화형 모드[/bold cyan]")
     console.print("=" * 70)
     console.print()
+
+    # 설정 관리자 초기화
+    settings = SettingsManager()
 
     try:
         # 1. Taxonomy file
@@ -69,6 +73,12 @@ def interactive_mode():
 
         industry_idx = IntPrompt.ask("  선택 (번호)", default=1) - 1
         industry = industries[industry_idx] if 0 <= industry_idx < len(industries) else industries[0]
+
+        # If 'other' is selected, ask for custom industry
+        custom_industry = None
+        if industry == "other":
+            custom_industry = Prompt.ask("  커스텀 산업 유형을 입력하세요 (예: healthcare, automotive, logistics)")
+            console.print(f"  [green]✓ 커스텀 산업 유형: {custom_industry}[/green]")
 
         console.print("\n  플랫폼 유형:")
         platforms = ["mobile_app", "web", "desktop", "hybrid"]
@@ -129,12 +139,24 @@ def interactive_mode():
         avg_events_max = IntPrompt.ask("  1인당 하루 평균 최대 이벤트 수", default=30)
         console.print()
 
-        # 8. AI provider
-        console.print("[bold yellow]🤖 Step 8: AI 제공자[/bold yellow]")
+        # 8. AI provider and API key
+        console.print("[bold yellow]🤖 Step 8: AI 제공자 및 API 키[/bold yellow]")
         console.print("  1. OpenAI (GPT)")
         console.print("  2. Anthropic (Claude)")
         ai_choice = IntPrompt.ask("  선택 (번호)", default=2)
         ai_provider = "anthropic" if ai_choice == 2 else "openai"
+
+        # API 키 입력 (설정에서 불러오거나 새로 입력)
+        console.print()
+        if ai_provider == "anthropic":
+            api_key = settings.get_anthropic_api_key()
+        else:
+            api_key = settings.get_openai_api_key()
+
+        if not api_key:
+            console.print("[yellow]  ⚠️  API 키가 필요합니다. 계속 진행하려면 API 키를 입력하세요.[/yellow]")
+            return
+
         console.print()
 
         # 9. Output
@@ -144,12 +166,13 @@ def interactive_mode():
 
         # Summary
         console.print("=" * 70)
+        industry_display = f"{industry} ({custom_industry})" if custom_industry else industry
         console.print(Panel.fit(
             f"""[bold]설정 확인[/bold]
 
 [cyan]제품 정보[/cyan]
   • 이름: {product_name}
-  • 산업: {industry}
+  • 산업: {industry_display}
   • 플랫폼: {platform}
 
 [cyan]데이터 생성[/cyan]
@@ -180,6 +203,7 @@ def interactive_mode():
             taxonomy_file=taxonomy_path,
             product_name=product_name,
             industry=IndustryType(industry),
+            custom_industry=custom_industry,
             platform=PlatformType(platform),
             start_date=start_date,
             end_date=end_date,
@@ -222,25 +246,34 @@ def interactive_mode():
             orchestrator.behavior_engine = orchestrator._initialize_behavior_engine()
             progress.update(task, completed=True, description=f"[green]✓ 행동 패턴 엔진 준비 완료")
 
-            task = progress.add_task("[cyan]로그 데이터 생성 중...", total=None)
-            logs = orchestrator._generate_logs()
-            progress.update(task, completed=True, description=f"[green]✓ {len(logs):,}개의 로그 생성 완료")
-
-            task = progress.add_task("[cyan]파일 저장 중...", total=None)
-            output_path = orchestrator._save_logs(logs)
-            progress.update(task, completed=True, description=f"[green]✓ 파일 저장 완료")
+            task = progress.add_task("[cyan]로그 데이터 생성 중 (일일 파일 분할)...", total=None)
+            result = orchestrator.execute()
+            progress.update(task, completed=True, description=f"[green]✓ 로그 생성 완료")
 
         console.print()
+
+        # 생성된 파일 정보
+        generated_files = orchestrator.log_generator.get_generated_files() if orchestrator.log_generator else []
+        total_logs = result.get("logs", 0)
+        output_dir = result.get("output_path", "")
+
         console.print(Panel.fit(
             f"""[bold green]✓ 데이터 생성 완료![/bold green]
 
 [cyan]생성 결과[/cyan]
-  • 총 로그 수: [bold]{len(logs):,}[/bold]개
-  • 출력 파일: [bold]{output_path}[/bold]
+  • 총 일수: [bold]{len(generated_files)}[/bold]일
+  • 총 로그 수: [bold]{total_logs:,}[/bold]개
+  • 출력 디렉토리: [bold]{output_dir}[/bold]
+  • 파일 개수: [bold]{len(generated_files)}[/bold]개
+
+[cyan]생성된 파일 (일일 분할)[/cyan]
+  {chr(10).join([f'  • {f.name}' for f in generated_files[:5]])}
+  {'  • ... 외 ' + str(len(generated_files) - 5) + '개' if len(generated_files) > 5 else ''}
 
 [cyan]다음 단계[/cyan]
-  1. 생성된 JSON 파일을 확인하세요
-  2. ThinkingEngine 또는 분석 도구로 데이터를 가져오세요
+  1. 생성된 JSON 파일들을 확인하세요
+  2. upload 명령어로 디렉토리를 업로드하세요:
+     python -m data_generator.main upload -d {output_dir}
   3. 필요시 다른 설정으로 다시 생성하세요
 """,
             title="🎉 완료",

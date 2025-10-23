@@ -20,35 +20,62 @@ class BehaviorEngine:
         ai_client: BaseAIClient,
         taxonomy: EventTaxonomy,
         product_info: Dict[str, Any],
+        custom_scenarios: Optional[Dict[str, str]] = None,
     ):
         self.ai_client = ai_client
         self.taxonomy = taxonomy
         self.product_info = product_info
         self.behavior_cache: Dict[str, Dict[str, Any]] = {}
+        self.custom_scenarios = custom_scenarios or {}  # {scenario_key: custom_behavior_text}
 
     def get_behavior_pattern(self, scenario_type: str) -> Dict[str, Any]:
         """
         Get or generate behavior pattern for a scenario.
         Uses caching to avoid repeated AI calls.
+        Supports both predefined and custom scenarios.
         """
         if scenario_type in self.behavior_cache:
             return self.behavior_cache[scenario_type]
 
-        # Get base characteristics from predefined patterns
-        base_pattern = ScenarioPattern.get_scenario_characteristics(scenario_type)
+        # Check if this is a custom scenario
+        is_custom = scenario_type.startswith("custom_")
 
-        # Get event names for AI context
-        event_names = self.taxonomy.get_all_event_names()
+        if is_custom:
+            # Custom scenario - use AI to generate pattern from description
+            custom_description = self.custom_scenarios.get(scenario_type, "")
 
-        # Generate AI-enhanced behavior pattern
-        ai_pattern = self.ai_client.generate_behavior_pattern(
-            product_info=self.product_info,
-            scenario=scenario_type,
-            event_taxonomy={"events": event_names[:50]},  # Limit to first 50 events
-        )
+            if not custom_description:
+                # Fallback to normal if no description
+                return self.get_behavior_pattern("normal")
 
-        # Merge base and AI patterns
-        merged_pattern = {**base_pattern, **ai_pattern}
+            # Get event names for AI context
+            event_names = self.taxonomy.get_all_event_names()
+
+            # Generate AI pattern for custom scenario
+            ai_pattern = self.ai_client.generate_custom_behavior_pattern(
+                product_info=self.product_info,
+                custom_scenario_description=custom_description,
+                event_taxonomy={"events": event_names[:50]},
+            )
+
+            # Use AI pattern directly for custom scenarios
+            merged_pattern = ai_pattern
+        else:
+            # Predefined scenario - use base + AI enhancement
+            base_pattern = ScenarioPattern.get_scenario_characteristics(scenario_type)
+
+            # Get event names for AI context
+            event_names = self.taxonomy.get_all_event_names()
+
+            # Generate AI-enhanced behavior pattern
+            ai_pattern = self.ai_client.generate_behavior_pattern(
+                product_info=self.product_info,
+                scenario=scenario_type,
+                event_taxonomy={"events": event_names[:50]},
+            )
+
+            # Merge base and AI patterns
+            merged_pattern = {**base_pattern, **ai_pattern}
 
         # Cache the result
         self.behavior_cache[scenario_type] = merged_pattern

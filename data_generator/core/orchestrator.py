@@ -90,14 +90,25 @@ class DataGenerationOrchestrator:
 
     def _initialize_behavior_engine(self) -> BehaviorEngine:
         """행동 패턴 엔진 초기화"""
+        # industry 표시: custom_industry가 있으면 사용, 없으면 기본 값
+        industry_display = self.config.custom_industry if self.config.custom_industry else self.config.industry.value
+
         product_info = {
             "product_name": self.config.product_name,
-            "industry": self.config.industry.value,
+            "industry": industry_display,
             "platform": self.config.platform.value,
             "product_description": self.config.product_description,
             "custom_scenario": self.config.custom_scenario,
         }
-        return BehaviorEngine(self.ai_client, self.taxonomy, product_info)
+
+        # 커스텀 시나리오 수집
+        custom_scenarios = {}
+        for scenario_config in self.config.scenarios:
+            if scenario_config.is_custom():
+                scenario_key = scenario_config.get_scenario_key()
+                custom_scenarios[scenario_key] = scenario_config.custom_behavior
+
+        return BehaviorEngine(self.ai_client, self.taxonomy, product_info, custom_scenarios)
 
     def _generate_logs(self) -> List[str]:
         """로그 데이터 생성"""

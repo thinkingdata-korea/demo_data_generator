@@ -35,10 +35,18 @@ class UserGenerator:
         # Generate users for each scenario
         for scenario_config in self.config.scenarios:
             count = scenario_counts[scenario_config.scenario_type]
-            segment = self._scenario_to_segment(scenario_config.scenario_type)
+
+            # Determine segment based on scenario type or custom behavior
+            if scenario_config.is_custom():
+                # For custom scenarios, use a default segment (can be customized later)
+                segment = UserSegment.ACTIVE_USER
+            else:
+                segment = self._scenario_to_segment(scenario_config.scenario_type)
 
             for _ in range(count):
                 user = self._create_user(segment)
+                # Store scenario key in user metadata for behavior engine
+                user.metadata["scenario_key"] = scenario_config.get_scenario_key()
                 users.append(user)
 
         return users

@@ -74,3 +74,23 @@ class BaseAIClient(ABC):
             Dictionary of initial user properties
         """
         pass
+
+    @abstractmethod
+    def generate_custom_behavior_pattern(
+        self,
+        product_info: Dict[str, Any],
+        custom_scenario_description: str,
+        event_taxonomy: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate behavior pattern for a custom scenario based on free-form text description.
+
+        Args:
+            product_info: Product/app information
+            custom_scenario_description: Free-form text describing the user behavior scenario
+            event_taxonomy: Event taxonomy information
+
+        Returns:
+            Behavior pattern dictionary with same structure as generate_behavior_pattern
+        """
+        pass

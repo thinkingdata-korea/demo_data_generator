@@ -149,3 +149,55 @@ Return as JSON with property names as keys.
 """
 
         return self._call_api(system_prompt, user_prompt)
+
+    def generate_custom_behavior_pattern(
+        self,
+        product_info: Dict[str, Any],
+        custom_scenario_description: str,
+        event_taxonomy: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Generate behavior pattern for a custom scenario"""
+
+        system_prompt = """You are an expert in user behavior analysis and product analytics.
+Generate realistic user behavior patterns based on custom scenario descriptions.
+Analyze the scenario description and create appropriate behavior characteristics.
+Return your response as a JSON object only."""
+
+        user_prompt = f"""Generate a realistic behavior pattern for the following custom scenario:
+
+Product Information:
+- Name: {product_info.get('product_name')}
+- Industry: {product_info.get('industry')}
+- Platform: {product_info.get('platform')}
+- Description: {product_info.get('product_description', 'N/A')}
+
+Custom Scenario Description:
+"{custom_scenario_description}"
+
+Available Events: {', '.join(event_taxonomy.get('events', [])[:20])}  (showing first 20)
+
+Based on this scenario description, generate appropriate behavior characteristics:
+
+1. daily_session_count: How many times per day would this user type use the product?
+2. session_duration_minutes: How long would their average session be?
+3. activity_probability: What's the chance they'll be active on any given day? (0.0-1.0)
+4. event_engagement: Multiplier for how many events they trigger compared to average (0.5 = half, 2.0 = double)
+5. event_priorities: Which types of events would they focus on? (key: event name pattern, value: weight multiplier)
+6. time_pattern: When are they most likely to be active? (morning/afternoon/evening/night/random)
+7. daily_session_range: Range of sessions per day [min, max]
+8. session_duration_range: Range of session duration in minutes [min, max]
+
+Return as JSON:
+{{
+  "daily_session_count": <number>,
+  "session_duration_minutes": <number>,
+  "activity_probability": <0.0-1.0>,
+  "event_engagement": <number>,
+  "event_priorities": {{"pattern": <weight>, ...}},
+  "time_pattern": "<morning|afternoon|evening|night|random>",
+  "daily_session_range": [<min>, <max>],
+  "session_duration_range": [<min>, <max>]
+}}
+"""
+
+        return self._call_api(system_prompt, user_prompt)

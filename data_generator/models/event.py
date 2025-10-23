@@ -23,7 +23,6 @@ class TrackEvent(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json_line(self) -> str:
         """Convert to single-line JSON string"""
@@ -53,7 +52,6 @@ class UserSetEvent(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json_line(self) -> str:
         import json
@@ -82,7 +80,6 @@ class UserSetOnceEvent(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json_line(self) -> str:
         import json
@@ -111,7 +108,6 @@ class UserAddEvent(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json_line(self) -> str:
         import json
@@ -140,7 +136,6 @@ class UserAppendEvent(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json_line(self) -> str:
         import json

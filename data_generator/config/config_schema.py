@@ -49,6 +49,17 @@ class ScenarioConfig(BaseModel):
     description: Optional[str] = Field(None, description="시나리오 설명")
     custom_behavior: Optional[str] = Field(None, description="커스텀 행동 시나리오 (자유 텍스트, AI가 해석)")
 
+    def is_custom(self) -> bool:
+        """커스텀 시나리오인지 확인"""
+        return self.custom_behavior is not None and len(self.custom_behavior.strip()) > 0
+
+    def get_scenario_key(self) -> str:
+        """시나리오를 식별하는 고유 키 반환"""
+        if self.is_custom():
+            # 커스텀 시나리오는 custom_behavior를 키로 사용
+            return f"custom_{hash(self.custom_behavior) & 0xFFFFFFFF:08x}"
+        return self.scenario_type.value
+
 
 class DataGeneratorConfig(BaseModel):
     """Main configuration for data generation"""
@@ -59,6 +70,7 @@ class DataGeneratorConfig(BaseModel):
     # Product information
     product_name: str = Field(..., description="Product/App name")
     industry: IndustryType = Field(..., description="Industry/Product type")
+    custom_industry: Optional[str] = Field(None, description="Custom industry type (when industry=OTHER)")
     platform: PlatformType = Field(..., description="Platform type")
 
     # Date range

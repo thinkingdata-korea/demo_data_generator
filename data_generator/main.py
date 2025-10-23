@@ -40,6 +40,27 @@ def interactive():
 
 
 @cli.command()
+def settings():
+    """저장된 설정 확인"""
+    from .config.settings_manager import SettingsManager
+    settings_mgr = SettingsManager()
+    settings_mgr.show()
+
+
+@cli.command()
+def clear_settings():
+    """저장된 설정 삭제"""
+    from .config.settings_manager import SettingsManager
+    from rich.prompt import Confirm
+
+    if Confirm.ask("[yellow]모든 저장된 설정을 삭제하시겠습니까?[/yellow]", default=False):
+        settings_mgr = SettingsManager()
+        settings_mgr.clear()
+    else:
+        console.print("[dim]취소되었습니다.[/dim]")
+
+
+@cli.command()
 @click.option('--taxonomy', '-t', required=True, type=click.Path(exists=True), help='택소노미 Excel/CSV 파일 경로')
 @click.option('--product-name', '-p', required=True, help='제품/앱 이름')
 @click.option('--industry', '-i', required=True, type=click.Choice([e.value for e in IndustryType]), help='산업 유형')
@@ -142,7 +163,14 @@ def generate(
                 "platform": config.platform.value,
                 "product_description": config.product_description,
             }
-            behavior_engine = BehaviorEngine(ai_client, taxonomy_data, product_info)
+            # Collect custom scenarios from config
+            custom_scenarios = {}
+            for scenario_config in config.scenarios:
+                if scenario_config.is_custom():
+                    scenario_key = scenario_config.get_scenario_key()
+                    custom_scenarios[scenario_key] = scenario_config.custom_behavior
+
+            behavior_engine = BehaviorEngine(ai_client, taxonomy_data, product_info, custom_scenarios)
             progress.update(task, completed=True, description=f"[green]✓ Behavior engine ready")
 
             # Step 5: Generate logs
@@ -200,18 +228,20 @@ def inspect(taxonomy_file: str):
 
 
 @cli.command()
-@click.option('--data-file', '-f', required=True, type=click.Path(exists=True), help='업로드할 데이터 파일 경로 (.jsonl)')
-@click.option('--app-id', '-a', type=str, default=None, help='ThinkingEngine APP ID (기본값: .env의 TE_APP_ID)')
-@click.option('--push-url', '-u', type=str, default=None, help='ThinkingEngine Receiver URL (기본값: .env의 TE_RECEIVER_URL)')
-@click.option('--logbus-path', '-l', type=str, default=None, help='LogBus2 바이너리 경로 (기본값: .env의 LOGBUS_PATH)')
-@click.option('--cpu-limit', type=int, default=None, help='CPU 코어 수 제한 (기본값: .env의 LOGBUS_CPU_LIMIT)')
+@click.option('--data-file', '-f', type=click.Path(exists=True), default=None, help='업로드할 데이터 파일 경로 (.jsonl)')
+@click.option('--data-dir', '-d', type=click.Path(exists=True), default=None, help='업로드할 데이터 디렉토리 경로 (일일 분할 파일)')
+@click.option('--app-id', '-a', type=str, default=None, help='ThinkingEngine APP ID (기본값: 설정 파일)')
+@click.option('--push-url', '-u', type=str, default=None, help='ThinkingEngine Receiver URL (기본값: 설정 파일)')
+@click.option('--logbus-path', '-l', type=str, default=None, help='LogBus2 바이너리 경로 (기본값: 설정 파일)')
+@click.option('--cpu-limit', type=int, default=None, help='CPU 코어 수 제한 (기본값: 4)')
 @click.option('--compress', is_flag=True, default=True, help='Gzip 압축 사용')
 @click.option('--auto-remove', is_flag=True, default=False, help='업로드 후 파일 자동 삭제')
 @click.option('--remove-after-days', type=int, default=7, help='파일 삭제 기간 (일)')
 @click.option('--monitor-interval', type=int, default=5, help='모니터링 간격 (초)')
 @click.option('--no-auto-stop', is_flag=True, default=False, help='업로드 후 LogBus 자동 중지 안 함')
 def upload(
-    data_file: str,
+    data_file: Optional[str],
+    data_dir: Optional[str],
     app_id: Optional[str],
     push_url: Optional[str],
     logbus_path: Optional[str],
@@ -222,22 +252,68 @@ def upload(
     monitor_interval: int,
     no_auto_stop: bool,
 ):
-    """생성된 데이터를 ThinkingEngine으로 업로드"""
+    """생성된 데이터를 ThinkingEngine으로 업로드 (단일 파일 또는 디렉토리)"""
+    from .config.settings_manager import SettingsManager
+    from pathlib import Path
+
+    # 데이터 소스 확인
+    if not data_file and not data_dir:
+        console.print("[red]✗ --data-file 또는 --data-dir 중 하나를 지정해야 합니다.[/red]")
+        console.print("  예시:")
+        console.print("    python -m data_generator.main upload -f logs_20240101.jsonl")
+        console.print("    python -m data_generator.main upload -d ./data_generator/output")
+        return
+
+    if data_file and data_dir:
+        console.print("[red]✗ --data-file과 --data-dir를 동시에 사용할 수 없습니다.[/red]")
+        return
+
+    # 데이터 경로 결정
+    if data_dir:
+        data_path = Path(data_dir)
+        if not data_path.is_dir():
+            console.print(f"[red]✗ 디렉토리를 찾을 수 없습니다: {data_dir}[/red]")
+            return
+        # 디렉토리 내 .jsonl 파일들 찾기
+        jsonl_files = sorted(data_path.glob("logs_*.jsonl"))
+        if not jsonl_files:
+            console.print(f"[red]✗ 디렉토리에 logs_*.jsonl 파일이 없습니다: {data_dir}[/red]")
+            return
+        console.print(f"\n[cyan]발견된 파일:[/cyan] {len(jsonl_files)}개")
+        for f in jsonl_files[:5]:
+            console.print(f"  • {f.name}")
+        if len(jsonl_files) > 5:
+            console.print(f"  • ... 외 {len(jsonl_files) - 5}개")
+        data_file = str(data_path / "logs_*.jsonl")  # 와일드카드 패턴
+    else:
+        data_file = str(data_file)
+
     console.print("\n[bold cyan]📤 LogBus2 데이터 업로드[/bold cyan]")
     console.print("=" * 60)
 
-    # Load from environment variables if not provided
-    app_id = app_id or os.getenv("TE_APP_ID")
-    push_url = push_url or os.getenv("TE_RECEIVER_URL")
-    logbus_path = logbus_path or os.getenv("LOGBUS_PATH", "./logbus 2/logbus")
+    # 설정 관리자에서 불러오기
+    settings = SettingsManager()
+
+    # Load from settings or environment variables
+    app_id = app_id or settings.get("te_app_id") or os.getenv("TE_APP_ID")
+    push_url = push_url or settings.get("te_receiver_url") or os.getenv("TE_RECEIVER_URL")
+    logbus_path = logbus_path or settings.get("logbus_path") or os.getenv("LOGBUS_PATH", "./logbus 2/logbus")
     cpu_limit = cpu_limit or int(os.getenv("LOGBUS_CPU_LIMIT", "4"))
 
-    # Validate required fields
+    # 설정이 없으면 입력받기
     if not app_id:
-        console.print("[red]✗ APP ID가 필요합니다. --app-id 옵션을 사용하거나 .env 파일에 TE_APP_ID를 설정하세요.[/red]")
+        app_id = settings.get_te_app_id()
+    if not push_url:
+        push_url = settings.get_te_receiver_url()
+    if not logbus_path:
+        logbus_path = settings.get_logbus_path()
+
+    # Validate required fields (all fields should be set by now through settings manager)
+    if not app_id:
+        console.print("[red]✗ APP ID가 필요합니다. 설정에서 APP ID를 입력하거나 --app-id 옵션을 사용하세요.[/red]")
         return
     if not push_url:
-        console.print("[red]✗ Receiver URL이 필요합니다. --push-url 옵션을 사용하거나 .env 파일에 TE_RECEIVER_URL을 설정하세요.[/red]")
+        console.print("[red]✗ Receiver URL이 필요합니다. 설정에서 Receiver URL을 입력하거나 --push-url 옵션을 사용하세요.[/red]")
         return
 
     console.print(f"\n[green]설정:[/green]")

@@ -61,3 +61,20 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# LogBus2 runtime files
+logbus*/runtime/
+logbus*/log/
+**/logbus*/runtime/
+**/logbus*/log/
+
+# API Keys and sensitive config
+*.key
+*.pem
+.demo_data_generator_config.json
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.~*

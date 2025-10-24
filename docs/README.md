@@ -10,13 +10,18 @@ AI 기반 데모 로그 데이터 생성기 - ThinkingEngine 형식의 현실적
 
 - 📊 **Excel/CSV 택소노미 지원**: 이벤트 데이터 수집 계획을 Excel 또는 CSV로 정의
 - 🤖 **AI 기반 행동 시뮬레이션**: OpenAI 또는 Claude API를 사용한 현실적인 사용자 행동 패턴 생성
+- 🧠 **AI 기반 지능형 속성 생성**: 택소노미를 분석하여 산업별 현실적인 속성값 자동 생성
+  - 속성 간 관계 자동 파악 (레벨 → XP, 공격력 → 전투력 등)
+  - 산업별 적절한 값 범위 자동 결정
+  - 현실적인 아이템/제품명 생성 (AI가 20-50개 예시 제공)
 - 🎭 **다양한 시나리오**: 신규 유저, 파워 유저, 이탈 유저 등 여러 행동 시나리오 지원
 - 🎯 **커스텀 시나리오**: AI를 통해 자유롭게 정의한 사용자 행동 패턴 생성 가능
 - ⏰ **시간 패턴**: 시간대별, 요일별 활동 분포 반영
 - 🌐 **다양한 산업 지원**: 게임, 전자상거래, 미디어, 금융 등 여러 산업 지원 (커스텀 산업 입력 가능)
 - 📱 **멀티 플랫폼**: 모바일 앱, 웹, 데스크톱 지원
 - 🔧 **프리셋 속성 자동 생성**: 플랫폼별 필수 프리셋 속성 자동 포함 (OS, 디바이스, 브라우저 정보 등)
-- 📤 **LogBus2 연동**: 생성된 데이터를 ThinkingEngine으로 자동 업로드
+- 📂 **일일 분할 파일 생성**: 대용량 데이터를 날짜별로 분할하여 메모리 효율적 생성
+- 📤 **LogBus2 연동**: 생성된 데이터를 ThinkingEngine으로 자동 업로드 (단일/다중 파일 지원)
 - 💾 **설정 관리**: API 키, APP ID 등 자동 저장으로 반복 입력 불필요
 
 ## 빠른 시작
@@ -134,27 +139,31 @@ python -m data_generator.main inspect event_tracking/data/예시\ -\ 방치형\ 
 생성된 데이터를 ThinkingEngine으로 업로드:
 
 ```bash
-# .env에 설정이 있는 경우
+# 단일 파일 업로드
 python -m data_generator.main upload \
-  -f ./data_generator/output/logs_YYYYMMDD_HHMMSS.jsonl
+  -f ./data_generator/output/logs_20240101.jsonl
 
-# 또는 직접 지정
+# 디렉토리 내 모든 파일 업로드 (일일 분할 파일)
 python -m data_generator.main upload \
-  -f ./data_generator/output/logs_YYYYMMDD_HHMMSS.jsonl \
-  -a YOUR_APP_ID \
-  -u https://te-receiver-naver.thinkingdata.kr/
+  -d ./data_generator/output
+
+# 설정이 저장되어 있으면 APP_ID 등을 자동으로 사용
+# 처음 실행 시 대화형으로 설정 입력 후 자동 저장됨
 ```
 
 #### 업로드 옵션
 
-- `--data-file`, `-f`: 업로드할 데이터 파일 경로 **(필수)**
-- `--app-id`, `-a`: ThinkingEngine APP ID
-- `--push-url`, `-u`: ThinkingEngine Receiver URL
-- `--logbus-path`, `-l`: LogBus2 바이너리 경로
+- `--data-file`, `-f`: 단일 파일 업로드 경로
+- `--data-dir`, `-d`: 디렉토리 업로드 경로 (일일 분할 파일용)
+- `--app-id`, `-a`: ThinkingEngine APP ID (저장된 설정 사용 가능)
+- `--push-url`, `-u`: ThinkingEngine Receiver URL (저장된 설정 사용 가능)
+- `--logbus-path`, `-l`: LogBus2 바이너리 경로 (저장된 설정 사용 가능)
 - `--cpu-limit`: CPU 코어 수 제한
 - `--compress`: Gzip 압축 사용 (기본값: true)
 - `--auto-remove`: 업로드 후 파일 자동 삭제
 - `--remove-after-days`: 파일 삭제 기간 (일, 기본값: 7)
+
+> **팁**: 설정은 `~/.demo_data_generator_config.json`에 저장되므로 매번 입력할 필요가 없습니다!
 
 자세한 업로드 가이드: [UPLOAD_GUIDE.md](./UPLOAD_GUIDE.md)
 
@@ -330,16 +339,55 @@ demo_data_generator/
 ## 예시 워크플로우
 
 ```bash
-# 1. 대화형 모드로 데이터 생성
+# 1. 대화형 모드로 데이터 생성 (권장)
 python -m data_generator.main interactive
 
 # 2. 생성된 파일 확인
 ls -lh data_generator/output/
+# 출력 예시:
+# logs_20240101.jsonl  859MB
+# logs_20240102.jsonl  852MB
+# logs_20240103.jsonl  878MB
+# ...
 
-# 3. ThinkingEngine으로 업로드
-python -m data_generator.main upload \
-  -f data_generator/output/logs_20240101_143025.jsonl
+# 3. ThinkingEngine으로 업로드 (디렉토리 전체)
+python -m data_generator.main upload -d data_generator/output
+
+# 또는 특정 파일만 업로드
+python -m data_generator.main upload -f data_generator/output/logs_20240101.jsonl
 ```
+
+## AI 기반 데이터 품질
+
+이 생성기는 단순한 랜덤 데이터가 아닌, **AI가 택소노미를 분석**하여 현실적인 데이터를 생성합니다:
+
+### 🧠 지능형 속성 생성
+
+```
+1. 택소노미 분석 (1회)
+   ↓
+2. AI가 속성 간 관계 파악
+   - 예: level이 증가하면 XP도 증가
+   - 예: attack이 높으면 combat_power도 높음
+   ↓
+3. 산업별 현실적 범위 결정
+   - 게임: level 1-100, gold 100-100000
+   - 이커머스: price 1000-500000
+   - 금융: balance 0-10000000
+   ↓
+4. 현실적인 값 생성
+   - 아이템명: "Flame Sword", "Dragon Armor"
+   - 제품명: "iPhone 15 Pro", "Galaxy S24"
+   - 채널: "organic", "google_ads", "facebook"
+```
+
+**결과**: 분석에 의미 있는, 실제 같은 데이터!
+
+### 🎯 행동 패턴 시뮬레이션
+
+- **이벤트 시퀀스**: 앱 시작 → 튜토리얼 → 레벨업 → 구매 (자연스러운 흐름)
+- **시간 패턴**: 출퇴근 시간에 많고, 새벽에 적음
+- **유저 세그먼트**: 신규/파워/이탈 유저별 다른 행동 패턴
 
 ## 문제 해결
 

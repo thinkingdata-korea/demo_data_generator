@@ -116,7 +116,8 @@ class DataGenerationOrchestrator:
             self.config,
             self.taxonomy,
             self.behavior_engine,
-            self.users
+            self.users,
+            ai_client=self.ai_client  # AI 기반 속성 생성 활성화
         )
         return self.log_generator.generate()
 

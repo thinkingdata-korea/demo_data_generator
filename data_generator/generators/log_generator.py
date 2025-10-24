@@ -13,6 +13,7 @@ from ..models.taxonomy import EventTaxonomy, UpdateMethod
 from ..config.config_schema import DataGeneratorConfig
 from ..generators.behavior_engine import BehaviorEngine
 from ..generators.preset_properties import PresetPropertiesGenerator
+from ..generators.intelligent_property_generator import IntelligentPropertyGenerator
 from ..ai.base_client import BaseAIClient
 from ..utils.property_validator import PropertyNameValidator
 
@@ -26,6 +27,7 @@ class LogGenerator:
         taxonomy: EventTaxonomy,
         behavior_engine: BehaviorEngine,
         users: List[User],
+        ai_client: Optional[BaseAIClient] = None,
     ):
         self.config = config
         self.taxonomy = taxonomy
@@ -38,6 +40,30 @@ class LogGenerator:
             platform=config.platform,
             product_name=config.product_name
         )
+
+        # AI 기반 지능형 속성 생성기 초기화 (옵션)
+        self.intelligent_generator: Optional[IntelligentPropertyGenerator] = None
+        if ai_client:
+            # 택소노미에서 모든 속성 수집
+            all_properties = []
+            all_properties.extend(taxonomy.common_properties)
+            for event in taxonomy.events:
+                if event.properties:
+                    all_properties.extend(event.properties)
+
+            # 제품 정보
+            product_info = {
+                "industry": config.industry,
+                "platform": config.platform,
+                "product_name": config.product_name,
+                "product_description": config.product_description or ""
+            }
+
+            self.intelligent_generator = IntelligentPropertyGenerator(
+                ai_client=ai_client,
+                taxonomy_properties=all_properties,
+                product_info=product_info
+            )
 
         # 각 유저별 프리셋 속성 캐싱 (디바이스 ID 등은 유저별로 일관되어야 함)
         self.user_preset_cache: Dict[str, Dict[str, Any]] = {}
@@ -52,6 +78,10 @@ class LogGenerator:
         """
         total_days = (self.config.end_date - self.config.start_date).days + 1
         print(f"Generating logs for {len(self.users)} users from {self.config.start_date} to {self.config.end_date} ({total_days} days)")
+
+        # AI 기반 속성 분석 수행 (한 번만)
+        if self.intelligent_generator:
+            self.intelligent_generator.analyze_properties()
 
         # 출력 디렉토리 생성
         output_dir = Path(self.config.output_dir)
@@ -246,15 +276,25 @@ class LogGenerator:
 
         for prop in event.properties:
             # Generate value based on property type
-            value = self._generate_property_value(user, prop)
+            value = self._generate_property_value(user, prop, event.name)
             properties[prop.name] = value
 
         return properties
 
-    def _generate_property_value(self, user: User, prop) -> Any:
+    def _generate_property_value(self, user: User, prop, event_name: Optional[str] = None) -> Any:
         """Generate a realistic value for a property"""
         prop_type = prop.property_type.value
 
+        # AI 기반 생성기가 있으면 사용
+        if self.intelligent_generator:
+            return self.intelligent_generator.generate_property_value(
+                prop_name=prop.name,
+                prop_type=prop_type,
+                user=user,
+                event_name=event_name
+            )
+
+        # 폴백: 기본 랜덤 생성 (AI 없을 때만)
         if prop_type == "string":
             return self._generate_string_value(prop.name)
         elif prop_type == "number":
@@ -331,13 +371,21 @@ class LogGenerator:
         if random.random() < 0.3:  # 30% chance to update user state
             updates = {}
 
-            # Example: update level or currency based on events
-            if "complete" in event_name.lower() or "clear" in event_name.lower():
-                updates["current_level"] = user.get_state("current_level", 1) + 1
+            # AI 기반 업데이트 결정
+            if self.intelligent_generator:
+                updates = self.intelligent_generator.should_update_user_property(
+                    event_name=event_name,
+                    user=user,
+                    event_properties=event_properties
+                )
+            else:
+                # 폴백: 하드코딩 로직 (AI 없을 때만)
+                if "complete" in event_name.lower() or "clear" in event_name.lower():
+                    updates["current_level"] = user.get_state("current_level", 1) + 1
 
-            if "purchase" in event_name.lower():
-                amount = event_properties.get("price", 1000)
-                updates["total_purchase_amount"] = user.get_state("total_purchase_amount", 0) + amount
+                if "purchase" in event_name.lower():
+                    amount = event_properties.get("price", 1000)
+                    updates["total_purchase_amount"] = user.get_state("total_purchase_amount", 0) + amount
 
             if updates:
                 # Validate and sanitize property names

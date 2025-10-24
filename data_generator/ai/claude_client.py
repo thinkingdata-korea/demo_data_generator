@@ -3,7 +3,7 @@ Claude (Anthropic) client for AI-powered data generation.
 """
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from anthropic import Anthropic
 
 from .base_client import BaseAIClient
@@ -153,6 +153,74 @@ Generate realistic initial values for properties that should be set when a user 
 Skip properties that should remain null initially.
 Return as JSON with property names as keys.
 """
+
+        return self._call_api(system_prompt, user_prompt)
+
+    def analyze_property_relationships(
+        self,
+        taxonomy_properties: List[Dict[str, Any]],
+        product_info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        택소노미의 속성들을 분석해서 속성 간 관계와 생성 규칙을 파악
+        """
+        system_prompt = """You are an expert in data modeling and product analytics.
+Analyze the property schema and determine realistic relationships and value generation rules.
+Return your response as a JSON object only, without any markdown formatting."""
+
+        # 속성 정보 요약
+        properties_summary = []
+        for prop in taxonomy_properties[:30]:  # 최대 30개만
+            properties_summary.append({
+                "name": prop.get("name"),
+                "type": prop.get("property_type", "string"),
+                "description": prop.get("description", "")
+            })
+
+        user_prompt = f"""Analyze these properties for a {product_info.get('industry')} product ({product_info.get('platform')} platform):
+
+Properties:
+{json.dumps(properties_summary, indent=2, ensure_ascii=False)}
+
+Product Description: {product_info.get('product_description', 'N/A')}
+
+Determine:
+1. Which properties are related to each other (e.g., level affects XP, attack affects combat power)
+2. Realistic value ranges for each property based on the industry
+3. Generation rules or formulas for derived properties
+4. **IMPORTANT**: For string properties (names, titles, categories, etc.), provide 20-50 realistic example values that are appropriate for this industry
+
+Return JSON with this structure:
+{{
+  "property_relationships": {{
+    "property_name": {{
+      "depends_on": ["other_property1", "other_property2"],
+      "relationship": "description of how they relate",
+      "formula_hint": "optional formula like 'level * 1000'"
+    }}
+  }},
+  "value_ranges": {{
+    "property_name": {{
+      "min": <number>,
+      "max": <number>,
+      "typical": <number>,
+      "context": "why this range makes sense",
+      "example_values": ["realistic_value_1", "realistic_value_2", ...]  // For string properties: provide 20-50 realistic examples
+    }}
+  }},
+  "generation_strategy": {{
+    "property_name": "rule-based" | "ai-contextual" | "random-simple"
+  }}
+}}
+
+**Examples of good example_values**:
+- Game item names: ["Flame Sword", "Dragon Armor", "Health Potion", "Magic Staff", "Iron Shield", ...]
+- E-commerce products: ["iPhone 15 Pro", "Nike Air Max 90", "Samsung Galaxy S24", "Sony WH-1000XM5", ...]
+- Finance account types: ["Premium Savings", "Gold Credit Card", "Investment Fund", "Checking Account", ...]
+- User channels: ["organic", "google_ads", "facebook", "instagram", "email_campaign", "referral", ...]
+- Categories/Types: Industry-appropriate category names
+
+Focus on making the data realistic for this specific industry and product type. Provide diverse, realistic examples that would actually appear in production data."""
 
         return self._call_api(system_prompt, user_prompt)
 

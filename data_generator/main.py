@@ -284,9 +284,12 @@ def upload(
             console.print(f"  • {f.name}")
         if len(jsonl_files) > 5:
             console.print(f"  • ... 외 {len(jsonl_files) - 5}개")
-        data_file = str(data_path / "logs_*.jsonl")  # 와일드카드 패턴
+        # 디렉토리 경로만 전달 (logbus_config.py에서 *.jsonl 패턴 추가)
+        data_file = str(data_path.absolute())
+        is_directory = True
     else:
         data_file = str(data_file)
+        is_directory = False
 
     console.print("\n[bold cyan]📤 LogBus2 데이터 업로드[/bold cyan]")
     console.print("=" * 60)

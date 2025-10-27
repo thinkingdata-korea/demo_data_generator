@@ -1,0 +1,265 @@
+{
+  "created_at": "2025-10-27T10:21:16.510142",
+  "rules": {
+    "te_app_instell": {
+      "event_type": "identity",
+      "updates": {
+        "set": {
+          "first_seen_time": "current_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Sets first seen time when app is first installed"
+    },
+    "te_app_start": {
+      "event_type": "session",
+      "updates": {
+        "set": {
+          "last_seen_time": "current_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates last seen time when app starts"
+    },
+    "te_app_end": {
+      "event_type": "session",
+      "updates": {
+        "set": {
+          "last_seen_time": "current_time"
+        },
+        "add_from_event": {
+          "total_playtime_minutes": "session_duration_minutes"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates last seen time and adds session playtime when app ends"
+    },
+    "te_app_crash": {
+      "event_type": "session",
+      "updates": {
+        "set": {
+          "last_seen_time": "current_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates last seen time when app crashes"
+    },
+    "te_new_device": {
+      "event_type": "identity",
+      "updates": {
+        "set": {
+          "first_seen_time": "current_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Sets first seen time for new device activation"
+    },
+    "te_register": {
+      "event_type": "identity",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Account registration event, handled by account_id setup"
+    },
+    "te_login": {
+      "event_type": "session",
+      "updates": {
+        "set": {
+          "last_login_time": "current_time"
+        },
+        "formula": {
+          "current_consecutive_login_days": "calculate_consecutive_days(last_login_time, current_time)",
+          "max_consecutive_login_days": "max(max_consecutive_login_days, current_consecutive_login_days)"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates login time and consecutive login streaks"
+    },
+    "te_logout": {
+      "event_type": "session",
+      "updates": {
+        "set": {
+          "last_seen_time": "current_time"
+        },
+        "add_from_event": {
+          "total_playtime_minutes": "online_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates last seen time and adds session playtime on logout"
+    },
+    "te_character_levelup": {
+      "event_type": "progression",
+      "updates": {
+        "set": {
+          "current_player_level": "current_character_level"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates current player level when character levels up"
+    },
+    "te_tutorial_step_completed": {
+      "event_type": "progression",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Tutorial progress tracking, no user property updates needed"
+    },
+    "te_stage_clear": {
+      "event_type": "progression",
+      "updates": {
+        "set": {
+          "current_main_stage_id": "stage_id"
+        },
+        "formula": {
+          "highest_main_stage_cleared": "max_stage(highest_main_stage_cleared, stage_id)"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates current and highest cleared stage"
+    },
+    "te_unit_upgrade": {
+      "event_type": "progression",
+      "updates": {
+        "formula": {
+          "main_team_combat_power": "recalculate_team_power()"
+        }
+      },
+      "probability": 1.0,
+      "description": "Recalculates team combat power after unit upgrade"
+    },
+    "te_currency_flow": {
+      "event_type": "progression",
+      "updates": {
+        "set": {
+          "current_gold_balance": "balance_after",
+          "current_premium_currency_balance": "balance_after"
+        },
+        "add_from_event": {
+          "lifetime_gold_earned": "amount"
+        }
+      },
+      "probability": 0.5,
+      "description": "Updates currency balances and lifetime earned amounts based on currency type"
+    },
+    "te_rewarded_ad_completed": {
+      "event_type": "conversion",
+      "updates": {
+        "increment": [
+          "total_rewarded_ads_watched"
+        ]
+      },
+      "probability": 1.0,
+      "description": "Increments total rewarded ads watched counter"
+    },
+    "te_iap_transaction": {
+      "event_type": "conversion",
+      "updates": {
+        "set": {
+          "last_iap_time": "current_time",
+          "first_iap_time": "current_time"
+        },
+        "increment": [
+          "total_iap_count"
+        ],
+        "add_from_event": {
+          "total_iap_amount": "price_usd"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates IAP counters, amounts, and timestamps"
+    },
+    "te_gacha_summon": {
+      "event_type": "progression",
+      "updates": {
+        "formula": {
+          "total_units_owned_count": "count_new_units(results_info)"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates unit count based on new units obtained from gacha"
+    },
+    "te_offline_reward_claimed": {
+      "event_type": "progression",
+      "updates": {
+        "set": {
+          "last_offline_reward_claim_time": "current_time"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates last offline reward claim timestamp"
+    },
+    "te_quest_completed": {
+      "event_type": "progression",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Quest completion tracking, rewards handled by currency_flow events"
+    },
+    "te_iap_purchase_attempt": {
+      "event_type": "conversion",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Purchase attempt tracking, no user property updates until success"
+    },
+    "te_iap_purchase_succeeded": {
+      "event_type": "conversion",
+      "updates": {
+        "set": {
+          "last_iap_time": "current_time",
+          "first_iap_time": "current_time"
+        },
+        "increment": [
+          "total_iap_count"
+        ],
+        "add_from_event": {
+          "total_iap_amount": "price_usd"
+        }
+      },
+      "probability": 1.0,
+      "description": "Updates IAP counters, amounts, and timestamps on successful purchase"
+    },
+    "te_iap_purchase_failed": {
+      "event_type": "conversion",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Failed purchase tracking, no user property updates"
+    },
+    "te_shop_entered": {
+      "event_type": "session",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Shop entry tracking, no user property updates needed"
+    },
+    "te_shop_item_purchased": {
+      "event_type": "progression",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Shop purchase tracking, currency changes handled by currency_flow events"
+    },
+    "te_combat_start": {
+      "event_type": "session",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Combat start tracking, no user property updates needed"
+    },
+    "te_combat_victory": {
+      "event_type": "progression",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Combat victory tracking, rewards handled by currency_flow events"
+    },
+    "te_combat_failure": {
+      "event_type": "progression",
+      "updates": {},
+      "probability": 1.0,
+      "description": "Combat failure tracking, no user property updates needed"
+    }
+  },
+  "metadata": {
+    "event_count": 26,
+    "product_info": {
+      "industry": "game_idle",
+      "platform": "mobile_app",
+      "product_name": "씽킹데이터 방치형",
+      "product_description": "제품 특성: 최소한의 조작만으로도 캐릭터가 자동으로 성장하고 재화를 쌓아, 바쁜 유저에게 시간적 부담 없이 폭발적인 성취감을 제공하는 것이 핵심 매력입니다.주요 기능: 게임을 끄거나 방치해도 진행되는 자동 사냥/오프라인 보상 시스템과 성장의 정체를 해소하는 명성(리셋) 메커니즘, 그리고 성장을 가속하는 장비 및 동료 수집 시스템이 주요 기능입니다."
+    }
+  }
+}

@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 
 from ..ai.base_client import BaseAIClient
 from ..models.taxonomy import EventTaxonomy
-from ..models.user import User, UserSegment
-from ..patterns.scenarios import ScenarioPattern
+from ..models.user import User, UserSegment, LifecycleStage
 from ..patterns.time_patterns import TimePatternGenerator
+from ..patterns.lifecycle_rules import LifecycleRulesEngine
 
 
 class BehaviorEngine:
@@ -21,12 +21,17 @@ class BehaviorEngine:
         taxonomy: EventTaxonomy,
         product_info: Dict[str, Any],
         custom_scenarios: Optional[Dict[str, str]] = None,
+        intelligent_generator=None,  # Optional[IntelligentPropertyGenerator]
     ):
         self.ai_client = ai_client
         self.taxonomy = taxonomy
         self.product_info = product_info
         self.behavior_cache: Dict[str, Dict[str, Any]] = {}
         self.custom_scenarios = custom_scenarios or {}  # {scenario_key: custom_behavior_text}
+        self.intelligent_generator = intelligent_generator  # AI 분석 결과 접근용
+
+        # 생명주기 규칙 엔진 (하드코딩 + AI)
+        self.lifecycle_rules = LifecycleRulesEngine()
 
     def get_behavior_pattern(self, scenario_type: str) -> Dict[str, Any]:
         """
@@ -40,6 +45,9 @@ class BehaviorEngine:
         # Check if this is a custom scenario
         is_custom = scenario_type.startswith("custom_")
 
+        # Get event names for AI context
+        event_names = self.taxonomy.get_all_event_names()
+
         if is_custom:
             # Custom scenario - use AI to generate pattern from description
             custom_description = self.custom_scenarios.get(scenario_type, "")
@@ -48,34 +56,19 @@ class BehaviorEngine:
                 # Fallback to normal if no description
                 return self.get_behavior_pattern("normal")
 
-            # Get event names for AI context
-            event_names = self.taxonomy.get_all_event_names()
-
             # Generate AI pattern for custom scenario
-            ai_pattern = self.ai_client.generate_custom_behavior_pattern(
+            merged_pattern = self.ai_client.generate_custom_behavior_pattern(
                 product_info=self.product_info,
                 custom_scenario_description=custom_description,
-                event_taxonomy={"events": event_names[:50]},
+                event_taxonomy={"events": event_names},
             )
-
-            # Use AI pattern directly for custom scenarios
-            merged_pattern = ai_pattern
         else:
-            # Predefined scenario - use base + AI enhancement
-            base_pattern = ScenarioPattern.get_scenario_characteristics(scenario_type)
-
-            # Get event names for AI context
-            event_names = self.taxonomy.get_all_event_names()
-
-            # Generate AI-enhanced behavior pattern
-            ai_pattern = self.ai_client.generate_behavior_pattern(
+            # Predefined scenario - use AI to generate pattern
+            merged_pattern = self.ai_client.generate_behavior_pattern(
                 product_info=self.product_info,
                 scenario=scenario_type,
-                event_taxonomy={"events": event_names[:50]},
+                event_taxonomy={"events": event_names},
             )
-
-            # Merge base and AI patterns
-            merged_pattern = {**base_pattern, **ai_pattern}
 
         # Cache the result
         self.behavior_cache[scenario_type] = merged_pattern
@@ -135,10 +128,21 @@ class BehaviorEngine:
     ) -> List[str]:
         """
         Select which events should occur during a session.
+        AI가 분석한 event_sequence를 우선 사용하고, 없으면 확률 기반으로 폴백
 
         Returns:
             List of event names in order
         """
+        # AI 분석 결과에서 이벤트 시퀀스 가져오기
+        ai_event_sequence = self._get_ai_event_sequence(user.segment)
+
+        # AI 시퀀스가 있으면 우선 사용 (순서 보장)
+        if ai_event_sequence:
+            sequence_events = self._select_from_sequence(ai_event_sequence, session_duration_minutes, user)
+            if sequence_events:  # 유효한 시퀀스가 있으면 반환
+                return sequence_events
+
+        # 폴백: 기존 확률 기반 방식
         events = []
 
         # Always start with app_start
@@ -155,27 +159,48 @@ class BehaviorEngine:
         engagement = behavior_pattern.get("event_engagement", 1.0)
         event_count = int(event_count * engagement)
 
-        # Get event priorities for this scenario
-        scenario_type = user.segment.value
-        priorities = ScenarioPattern.get_event_priority_for_scenario(scenario_type)
+        # AI 분석 결과에서 이벤트 확률 가져오기
+        ai_event_probs = self._get_ai_event_probabilities(user.segment)
 
-        # Filter events (exclude system events)
-        available_events = [
-            e for e in self.taxonomy.events
-            if not e.event_tag or "시스템" not in e.event_tag
-        ]
+        # Filter events (exclude system events + 생명주기 제약)
+        available_events = []
+        for e in self.taxonomy.events:
+            # 시스템 이벤트 제외
+            if e.event_tag and "시스템" in e.event_tag:
+                continue
 
-        # Calculate weights based on priorities
+            # 생명주기 단계에서 허용되는 이벤트인지 확인
+            if self.lifecycle_rules.is_event_allowed_in_lifecycle(e.event_name, user.lifecycle_stage):
+                available_events.append(e)
+
+        # 허용된 이벤트가 없으면 기본 이벤트만
+        if not available_events:
+            # app_end만 추가하고 반환
+            if any("end" in e.event_name.lower() for e in self.taxonomy.events):
+                end_events = [e.event_name for e in self.taxonomy.events if "end" in e.event_name.lower()]
+                if end_events:
+                    events.append(end_events[0])
+            return events
+
+        # Calculate weights based on AI event probabilities
         weights = []
         for event in available_events:
             weight = 1.0
-            # Check if event name matches any priority pattern
-            for pattern, multiplier in priorities.items():
-                if pattern != "default" and pattern.lower() in event.event_name.lower():
-                    weight = multiplier
-                    break
-            else:
-                weight = priorities.get("default", 1.0)
+
+            if ai_event_probs:
+                # 이벤트명 정확 매칭
+                if event.event_name in ai_event_probs:
+                    weight = ai_event_probs[event.event_name]
+                # 부분 매칭 (패턴)
+                else:
+                    matched = False
+                    for pattern, prob in ai_event_probs.items():
+                        if pattern.lower() in event.event_name.lower():
+                            weight = prob
+                            matched = True
+                            break
+                    # 매칭 안되면 기본 가중치 유지 (1.0)
+
             weights.append(weight)
 
         # Normalize weights
@@ -223,3 +248,92 @@ class BehaviorEngine:
             churn_prob = min(churn_prob * (1 + days_since_start * 0.1), 0.5)
 
         return random.random() < churn_prob
+
+    def _get_ai_event_probabilities(self, user_segment: UserSegment) -> Optional[Dict[str, float]]:
+        """
+        AI 분석 결과에서 세그먼트별 이벤트 확률 가져오기
+
+        Returns:
+            Dict[event_name, probability] or None if not available
+        """
+        if not self.intelligent_generator or not self.intelligent_generator.property_rules:
+            return None
+
+        segment_analysis = self.intelligent_generator.property_rules.get("segment_analysis", {})
+        segment_key = user_segment.value.upper()  # "NEW_USER", "ACTIVE_USER", etc.
+
+        if segment_key not in segment_analysis:
+            return None
+
+        event_probabilities = segment_analysis[segment_key].get("event_probabilities", {})
+
+        if not event_probabilities:
+            return None
+
+        return event_probabilities
+
+    def _get_ai_event_sequence(self, user_segment: UserSegment) -> Optional[List[str]]:
+        """
+        AI 분석 결과에서 세그먼트별 이벤트 시퀀스 가져오기
+
+        Returns:
+            List of event names in typical order, or None if not available
+        """
+        if not self.intelligent_generator or not self.intelligent_generator.property_rules:
+            return None
+
+        segment_analysis = self.intelligent_generator.property_rules.get("segment_analysis", {})
+        segment_key = user_segment.value.upper()
+
+        if segment_key not in segment_analysis:
+            return None
+
+        event_sequence = segment_analysis[segment_key].get("event_sequence", [])
+
+        if not event_sequence:
+            return None
+
+        return event_sequence
+
+    def _select_from_sequence(
+        self,
+        base_sequence: List[str],
+        session_duration_minutes: float,
+        user: User
+    ) -> List[str]:
+        """
+        AI가 제공한 이벤트 시퀀스 기반으로 세션 이벤트 선택
+        약간의 변형을 추가하여 자연스러움 유지
+
+        Args:
+            base_sequence: AI가 분석한 기본 이벤트 순서
+            session_duration_minutes: 세션 지속 시간
+            user: 유저 객체
+
+        Returns:
+            이벤트명 리스트 (순서 보장)
+        """
+        # 세션 시간에 따라 시퀀스에서 몇 개를 가져올지 결정
+        event_count = max(2, int(session_duration_minutes / 2.5))
+        event_count = min(event_count, len(base_sequence))
+
+        # 생명주기 단계에서 허용되는 이벤트만 필터링
+        allowed_sequence = []
+        for event_name in base_sequence:
+            if self.lifecycle_rules.is_event_allowed_in_lifecycle(event_name, user.lifecycle_stage):
+                allowed_sequence.append(event_name)
+
+        if not allowed_sequence:
+            # 허용된 이벤트가 없으면 빈 리스트 반환 (폴백 로직이 처리)
+            return []
+
+        # 시퀀스의 앞부분부터 선택 (자연스러운 흐름)
+        selected_events = allowed_sequence[:event_count]
+
+        # 30% 확률로 일부 이벤트를 스킵하거나 반복 (자연스러운 변형)
+        if random.random() < 0.3 and len(selected_events) > 2:
+            # 중간 이벤트 하나를 스킵
+            skip_idx = random.randint(1, len(selected_events) - 2)
+            selected_events = selected_events[:skip_idx] + selected_events[skip_idx + 1:]
+
+        return selected_events

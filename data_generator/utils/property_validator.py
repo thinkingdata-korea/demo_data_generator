@@ -16,11 +16,22 @@ class PropertyNameValidator:
 
     # 미리 설정된 ThinkingEngine 속성 (# 시작 가능)
     PREDEFINED_PROPERTIES = {
-        '#type', '#time', '#event_name', '#account_id', '#distinct_id',
-        '#ip', '#country', '#province', '#city', '#bundle_id', '#carrier',
-        '#device_id', '#device_model', '#manufacturer', '#network_type',
-        '#os', '#os_version', '#screen_height', '#screen_width',
-        '#system_language', '#zone_offset', '#app_version', '#uuid'
+        # 시스템 필드
+        '#type', '#time', '#event_name', '#account_id', '#distinct_id', '#uuid',
+        # 기본 공통 속성
+        '#ip', '#country', '#country_code', '#province', '#city', '#lib', '#lib_version',
+        '#zone_offset', '#device_id', '#screen_height', '#screen_width', '#system_language',
+        # 플랫폼별 속성
+        '#os', '#os_version', '#device_model', '#device_type', '#manufacturer',
+        '#app_version', '#bundle_id', '#network_type', '#carrier', '#install_time',
+        '#simulator', '#ram', '#disk', '#fps',
+        '#browser', '#browser_version', '#ua', '#utm',
+        # 이벤트별 전용 속성
+        '#resume_from_background', '#background_duration', '#start_reason',  # ta_app_start
+        '#duration',  # ta_app_end
+        '#title', '#screen_name', '#url', '#url_path', '#referrer', '#referrer_host',  # ta_app_view
+        '#element_id', '#element_type', '#element_selector', '#element_position', '#element_content',  # ta_app_click
+        '#app_crashed_reason',  # ta_app_crash
     }
 
     # 속성명 검증 패턴: 숫자/문자로 시작, 숫자/문자/밑줄만 포함

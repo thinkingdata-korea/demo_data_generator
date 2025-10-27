@@ -7,12 +7,13 @@ from typing import Dict, Any, Optional, List
 from openai import OpenAI
 
 from .base_client import BaseAIClient
+from ..utils.rate_limiter import RateLimiter
 
 
 class OpenAIClient(BaseAIClient):
     """OpenAI implementation of AI client"""
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, enable_rate_limit: bool = True):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not provided and OPENAI_API_KEY env var not set")
@@ -20,20 +21,60 @@ class OpenAIClient(BaseAIClient):
         self.client = OpenAI(api_key=self.api_key)
         self.model = model or "gpt-4o-mini"
 
-    def _call_api(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-        """Call OpenAI API and parse JSON response"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-        )
+        # Rate limiter 초기화
+        self.rate_limiter = RateLimiter(max_requests=10, window_seconds=60) if enable_rate_limit else None
 
-        content = response.choices[0].message.content
-        return json.loads(content)
+    def _call_api(self, system_prompt: str, user_prompt: str, max_retries: int = 3) -> Dict[str, Any]:
+        """
+        Call OpenAI API and parse JSON response with retry logic
+
+        Args:
+            system_prompt: System instruction
+            user_prompt: User query
+            max_retries: Maximum number of retry attempts for JSON parsing failures
+
+        Returns:
+            Parsed JSON response
+
+        Raises:
+            json.JSONDecodeError: If JSON parsing fails after all retries
+        """
+        last_error = None
+
+        for attempt in range(max_retries):
+            # Rate limit 체크
+            if self.rate_limiter:
+                self.rate_limiter.wait_if_needed('openai')
+
+            # 재시도 시 JSON 출력 강조
+            current_user_prompt = user_prompt
+            if attempt > 0:
+                current_user_prompt += "\n\n**CRITICAL: Your previous response had invalid JSON. Return ONLY valid JSON without any markdown formatting, explanations, or text outside the JSON object.**"
+
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": current_user_prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
+                )
+
+                content = response.choices[0].message.content
+                return json.loads(content)
+
+            except json.JSONDecodeError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    print(f"  ⚠️  JSON parsing failed (attempt {attempt + 1}/{max_retries}), retrying...")
+                else:
+                    print(f"  ❌ JSON parsing failed after {max_retries} attempts")
+                    raise
+
+        # Should never reach here, but just in case
+        raise last_error if last_error else json.JSONDecodeError("Unknown error", "", 0)
 
     def generate_behavior_pattern(
         self,
@@ -57,7 +98,7 @@ Product Information:
 
 User Scenario: {scenario}
 
-Available Events: {', '.join(event_taxonomy.get('events', [])[:20])}  (showing first 20)
+Available Events: {', '.join(event_taxonomy.get('events', []))}
 
 Generate a behavior pattern with:
 1. daily_session_count: How many times per day this user type typically uses the product
@@ -128,7 +169,7 @@ Return your response as a JSON object."""
 
         # Simplify schema for prompt
         properties_desc = []
-        for prop in user_schema.get('properties', [])[:20]:  # Limit to first 20
+        for prop in user_schema.get('properties', []):
             properties_desc.append(f"- {prop['name']} ({prop['type']}): {prop.get('description', 'N/A')}")
 
         user_prompt = f"""Generate initial user properties for:
@@ -140,7 +181,7 @@ Product Information:
 - Platform: {product_info.get('platform')}
 - Name: {product_info.get('product_name')}
 
-User Property Schema (first 20):
+User Property Schema:
 {chr(10).join(properties_desc)}
 
 Generate realistic initial values for properties that should be set when a user first appears.
@@ -174,7 +215,7 @@ Product Information:
 Custom Scenario Description:
 "{custom_scenario_description}"
 
-Available Events: {', '.join(event_taxonomy.get('events', [])[:20])}  (showing first 20)
+Available Events: {', '.join(event_taxonomy.get('events', []))}
 
 Based on this scenario description, generate appropriate behavior characteristics:
 
@@ -216,7 +257,7 @@ Return your response as a JSON object only."""
 
         # 속성 정보 요약
         properties_summary = []
-        for prop in taxonomy_properties[:30]:  # 최대 30개만
+        for prop in taxonomy_properties:
             properties_summary.append({
                 "name": prop.get("name"),
                 "type": prop.get("property_type", "string"),
@@ -230,19 +271,99 @@ Properties:
 
 Product Description: {product_info.get('product_description', 'N/A')}
 
-Determine:
-1. Which properties are related to each other (e.g., level affects XP, attack affects combat power)
-2. Realistic value ranges for each property based on the industry
-3. Generation rules or formulas for derived properties
-4. **IMPORTANT**: For string properties (names, titles, categories, etc.), provide 20-50 realistic example values that are appropriate for this industry
+**CRITICAL REQUIREMENTS:**
+
+1. **Logical Consistency Between Properties**:
+   - Identify properties that MUST be logically consistent with each other
+   - Example: carrier "#carrier" (LG U+, SKT, KT) → must match "#country" (South Korea)
+   - Example: carrier (Verizon, AT&T) → must match "#country" (United States)
+   - Example: "#city" must be in the correct "#country"
+   - These are HARD CONSTRAINTS that must never be violated
+
+2. **Event Context Rules**:
+   - Different events require different value ranges
+   - Example: "tutorial" events → level should be 1-3, low XP, minimal gold
+   - Example: "first_purchase" events → might grant bonus gold/gems
+   - Example: "level_up" events → level increases by 1, XP resets or increases
+   - Provide event-specific constraints in "event_constraints"
+
+3. **Property Relationships**: Which properties affect each other (e.g., level → XP, attack → combat_power)
+
+4. **Realistic Value Ranges**: Based on industry standards and user lifecycle stage
+
+5. **String Examples**: For string properties, provide 20-50 realistic, diverse examples
+   - For "name" properties: Include names from MULTIPLE countries/cultures (Korean, Japanese, American, Chinese names)
+   - For "channel" properties: Include diverse marketing channels (organic, facebook_ads, google_ads, tiktok_ads, instagram, youtube, referral, etc.)
+   - For game-specific strings: Provide contextually appropriate values (server_01-99, stage_1_1 format, guild names, etc.)
+   - Make example_values DIVERSE and REALISTIC for international users
+
+6. **USER SEGMENT ANALYSIS** ⭐ MOST IMPORTANT:
+   Analyze EACH user segment separately and provide specific ranges, sequences, and probabilities.
+
+   ⚠️ **CRITICAL**: You MUST include ALL SIX segments in your response. Missing any segment will cause errors.
+
+   User Segments to analyze (ALL REQUIRED):
+   - NEW_USER: Just started, onboarding phase (days 0-3)
+   - ACTIVE_USER: Regular users, established routine (days 7-90)
+   - POWER_USER: Heavy users, advanced features (30+ days, high engagement)
+   - CHURNING_USER: Declining engagement, at-risk users
+   - CHURNED_USER: Inactive or left
+   - RETURNING_USER: Coming back after absence
+
+   For EACH segment, provide:
+   a) **Property Ranges**: Specific min/max/mean for numeric properties based on ACTUAL TAXONOMY
+      - Use properties that EXIST in the provided taxonomy
+      - Game example: level 1-5 (mean 2), gold 0-500 (mean 200) for NEW_USER
+      - E-commerce example: total_purchases 0-2 (mean 0), total_spent 0-50 (mean 10) for NEW_USER
+      - SaaS example: features_used 1-3 (mean 1), sessions_count 1-5 (mean 2) for NEW_USER
+
+   b) **Event Sequence**: Typical event flow for this segment based on ACTUAL EVENTS
+      - Use events that EXIST in the provided taxonomy
+      - Adapt to the industry: onboarding → core actions → advanced features
+
+   c) **Event Probabilities**: Likelihood of each event type based on ACTUAL EVENTS
+      - Use events that EXIST in the provided taxonomy
+      - NEW_USER: Lower engagement, more onboarding events
+      - POWER_USER: Higher engagement, more advanced/conversion events
 
 Return JSON with this structure:
 {{
+  "property_constraints": {{
+    "carrier": {{
+      "type": "mapping",
+      "maps_to": "country",
+      "mappings": {{
+        "SKT": "South Korea",
+        "KT": "South Korea",
+        "LG U+": "South Korea",
+        "Verizon": "United States",
+        "AT&T": "United States",
+        "T-Mobile": "United States"
+      }}
+    }},
+    "city": {{
+      "type": "mapping",
+      "maps_to": "country",
+      "mappings": {{
+        "Seoul": "South Korea",
+        "Busan": "South Korea",
+        "San Francisco": "United States",
+        "New York": "United States"
+      }}
+    }}
+  }},
+  "event_constraints": {{
+    "event_name_example": {{
+      "property_name": {{"min": <number>, "max": <number>}},
+      "another_property": {{"change": "+N" or "formula"}},
+      "context": "Explain why these constraints exist based on event semantics"
+    }}
+  }},
   "property_relationships": {{
     "property_name": {{
-      "depends_on": ["other_property1", "other_property2"],
-      "relationship": "description of how they relate",
-      "formula_hint": "optional formula like 'level * 1000'"
+      "depends_on": ["other_property"],
+      "relationship": "description",
+      "formula_hint": "optional formula"
     }}
   }},
   "value_ranges": {{
@@ -250,8 +371,78 @@ Return JSON with this structure:
       "min": <number>,
       "max": <number>,
       "typical": <number>,
-      "context": "why this range makes sense",
-      "example_values": ["realistic_value_1", "realistic_value_2", ...]  // For string properties: provide 20-50 realistic examples
+      "context": "why this range",
+      "example_values": ["value1", "value2", ...]
+    }}
+  }},
+  "segment_analysis": {{
+    "NEW_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <low>, "max": <low>, "mean": <low>}},
+        "session_count": {{"min": 1, "max": 5, "mean": 2}},
+        "daily_session_count": {{"min": 1, "max": 3, "mean": 1}}
+      }},
+      "event_sequence": ["<actual_event_names_from_taxonomy>"],
+      "event_probabilities": {{
+        "<onboarding_event>": 0.8,
+        "<conversion_event>": 0.02
+      }}
+    }},
+    "ACTIVE_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <medium>, "max": <medium>, "mean": <medium>}},
+        "session_count": {{"min": 20, "max": 100, "mean": 50}},
+        "daily_session_count": {{"min": 2, "max": 5, "mean": 3}}
+      }},
+      "event_sequence": ["<actual_event_names_from_taxonomy>"],
+      "event_probabilities": {{
+        "<core_action_event>": 0.7,
+        "<conversion_event>": 0.05
+      }}
+    }},
+    "POWER_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <high>, "max": <very_high>, "mean": <high>}},
+        "session_count": {{"min": 100, "max": 500, "mean": 200}},
+        "daily_session_count": {{"min": 5, "max": 15, "mean": 8}}
+      }},
+      "event_sequence": ["<actual_event_names_from_taxonomy>"],
+      "event_probabilities": {{
+        "<advanced_feature_event>": 0.9,
+        "<conversion_event>": 0.2
+      }}
+    }},
+    "CHURNING_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <medium>, "max": <medium>, "mean": <medium>}},
+        "session_count": {{"min": 10, "max": 80, "mean": 30}},
+        "daily_session_count": {{"min": 0.5, "max": 2, "mean": 1}}
+      }},
+      "event_sequence": ["<actual_event_names_from_taxonomy>"],
+      "event_probabilities": {{
+        "<core_action_event>": 0.3,
+        "<conversion_event>": 0.01
+      }}
+    }},
+    "CHURNED_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <low>, "max": <medium>, "mean": <low>}},
+        "session_count": {{"min": 5, "max": 50, "mean": 20}}
+      }},
+      "event_sequence": [],
+      "event_probabilities": {{}}
+    }},
+    "RETURNING_USER": {{
+      "property_ranges": {{
+        "<actual_property_name>": {{"min": <medium>, "max": <high>, "mean": <medium>}},
+        "session_count": {{"min": 30, "max": 200, "mean": 80}},
+        "daily_session_count": {{"min": 2, "max": 6, "mean": 3}}
+      }},
+      "event_sequence": ["<actual_event_names_from_taxonomy>"],
+      "event_probabilities": {{
+        "<re_engagement_event>": 0.8,
+        "<conversion_event>": 0.08
+      }}
     }}
   }},
   "generation_strategy": {{
@@ -259,13 +450,24 @@ Return JSON with this structure:
   }}
 }}
 
-**Examples of good example_values**:
-- Game item names: ["Flame Sword", "Dragon Armor", "Health Potion", "Magic Staff", "Iron Shield", ...]
-- E-commerce products: ["iPhone 15 Pro", "Nike Air Max 90", "Samsung Galaxy S24", "Sony WH-1000XM5", ...]
-- Finance account types: ["Premium Savings", "Gold Credit Card", "Investment Fund", "Checking Account", ...]
-- User channels: ["organic", "google_ads", "facebook", "instagram", "email_campaign", "referral", ...]
-- Categories/Types: Industry-appropriate category names
+**CRITICAL: Use ONLY properties and events that EXIST in the provided taxonomy. Do NOT assume game-specific properties like 'level' or 'gold' unless they are in the taxonomy.**
 
-Focus on making the data realistic for this specific industry and product type. Provide diverse, realistic examples that would actually appear in production data."""
+**Focus on LOGICAL CONSISTENCY and SEGMENT-SPECIFIC REALISM**:
+- NEW_USER: Low engagement metrics, onboarding-focused events, minimal conversions
+- ACTIVE_USER: Medium engagement, regular usage patterns, moderate conversions
+- POWER_USER: High engagement metrics, advanced features, high conversion rates
+- CHURNING_USER: Declining engagement, fewer sessions, low conversion probability
+- CHURNED_USER: Historical data only, no recent activity
+- RETURNING_USER: Re-engagement patterns, catching up on updates
+
+**Industry Adaptation**:
+- Games: progression events (tutorials → core gameplay → endgame)
+- E-commerce: browse → add_to_cart → purchase flow
+- SaaS: onboarding → feature adoption → power usage
+
+**Always ensure**:
+- Geographic consistency (Korean carriers only in South Korea, etc.)
+- Event context alignment (early events = low metrics, late events = high metrics)
+- Realistic probability distributions across segments"""
 
         return self._call_api(system_prompt, user_prompt)

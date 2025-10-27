@@ -149,20 +149,41 @@ def generate(
                 ai_client = ClaudeClient(model=ai_model)
             progress.update(task, completed=True, description=f"[green]✓ AI client ready")
 
-            # Step 3: Generate users
-            task = progress.add_task("[cyan]Generating users...", total=None)
-            user_gen = UserGenerator(config, taxonomy_data)
-            users = user_gen.generate_users()
-            progress.update(task, completed=True, description=f"[green]✓ Generated {len(users):,} users")
+            # Step 2.5: Initialize IntelligentPropertyGenerator
+            task = progress.add_task("[cyan]Analyzing taxonomy for AI-based generation...", total=None)
+            from .generators.intelligent_property_generator import IntelligentPropertyGenerator
 
-            # Step 4: Initialize behavior engine
-            task = progress.add_task("[cyan]Initializing behavior engine...", total=None)
+            # 택소노미에서 모든 속성 수집
+            all_properties = []
+            all_properties.extend(taxonomy_data.common_properties)
+            all_properties.extend(taxonomy_data.user_properties)
+            for event in taxonomy_data.events:
+                if event.properties:
+                    all_properties.extend(event.properties)
+
             product_info = {
                 "product_name": config.product_name,
                 "industry": config.industry.value,
                 "platform": config.platform.value,
                 "product_description": config.product_description,
             }
+
+            intelligent_generator = IntelligentPropertyGenerator(
+                ai_client=ai_client,
+                taxonomy_properties=all_properties,
+                product_info=product_info
+            )
+            intelligent_generator.analyze_properties()
+            progress.update(task, completed=True, description=f"[green]✓ AI analysis complete")
+
+            # Step 3: Generate users
+            task = progress.add_task("[cyan]Generating users...", total=None)
+            user_gen = UserGenerator(config, taxonomy_data, intelligent_generator=intelligent_generator)
+            users = user_gen.generate_users()
+            progress.update(task, completed=True, description=f"[green]✓ Generated {len(users):,} users")
+
+            # Step 4: Initialize behavior engine
+            task = progress.add_task("[cyan]Initializing behavior engine...", total=None)
             # Collect custom scenarios from config
             custom_scenarios = {}
             for scenario_config in config.scenarios:
@@ -170,7 +191,13 @@ def generate(
                     scenario_key = scenario_config.get_scenario_key()
                     custom_scenarios[scenario_key] = scenario_config.custom_behavior
 
-            behavior_engine = BehaviorEngine(ai_client, taxonomy_data, product_info, custom_scenarios)
+            behavior_engine = BehaviorEngine(
+                ai_client,
+                taxonomy_data,
+                product_info,
+                custom_scenarios,
+                intelligent_generator=intelligent_generator  # AI 분석 결과 전달
+            )
             progress.update(task, completed=True, description=f"[green]✓ Behavior engine ready")
 
             # Step 5: Generate logs
@@ -360,6 +387,49 @@ def upload(
     except Exception as e:
         console.print(f"\n[bold red]✗ 오류: {str(e)}[/bold red]")
         raise
+
+
+@cli.command()
+def cache_stats():
+    """AI 분석 캐시 통계 조회"""
+    from .utils.cache_manager import CacheManager
+
+    cache = CacheManager()
+    stats = cache.get_stats()
+
+    console.print("\n[bold cyan]AI 분석 캐시 통계[/bold cyan]")
+    console.print("=" * 60)
+    console.print(f"[green]총 캐시 파일:[/green] {stats['total_cached']}")
+    console.print(f"[green]총 크기:[/green] {stats['total_size_mb']:.2f} MB")
+    console.print(f"[green]캐시 위치:[/green] {stats['cache_dir']}")
+
+    if stats['files']:
+        console.print(f"\n[cyan]캐시 파일 목록:[/cyan]")
+        for file_info in stats['files']:
+            console.print(f"  • {file_info['name']}")
+            console.print(f"    크기: {file_info['size_kb']:.1f} KB")
+            console.print(f"    생성: {file_info['created']}")
+            console.print(f"    수정: {file_info['modified']}")
+            console.print()
+    else:
+        console.print("\n[yellow]캐시 파일이 없습니다.[/yellow]")
+
+
+@cli.command()
+@click.option('--pattern', '-p', type=str, default=None, help='삭제할 패턴 (없으면 전체 삭제)')
+@click.confirmation_option(prompt='정말 캐시를 삭제하시겠습니까?')
+def cache_clear(pattern: Optional[str]):
+    """AI 분석 캐시 초기화"""
+    from .utils.cache_manager import CacheManager
+
+    cache = CacheManager()
+
+    if pattern:
+        cache.clear(pattern=pattern)
+        console.print(f"[green]✓ 패턴 '{pattern}' 캐시 삭제 완료[/green]")
+    else:
+        cache.clear()
+        console.print("[green]✓ 전체 캐시 초기화 완료[/green]")
 
 
 if __name__ == '__main__':
